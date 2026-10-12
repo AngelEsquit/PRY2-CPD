@@ -21,7 +21,7 @@
  * NOTA: este es el acercamiento base cuyo speedup es muy inconsistente
  * y depende fuertemente de en qué segmento caiga la llave solución
  * (ver discusión de la Parte B.2 del enunciado). Los acercamientos
- * alternativos están en approach1_mpi.c y approach2_mpi.c.
+ * alternativos están en master_worker_mpi.c y striding_mpi.c.
  *
  * Uso: mpirun -np <N> ./naive_mpi <archivo_cifrado> <palabra_clave> <max_key>
  *

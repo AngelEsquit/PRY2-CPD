@@ -28,7 +28,7 @@
    - `memcpy`
    - `strstr`
 6. Explicación de las primitivas MPI usadas: `MPI_Irecv`, `MPI_Send`,
-   `MPI_Wait` (ver comentarios en `src/naive_mpi.c`).
+   `MPI_Wait` (ver comentarios en `src/bruteforce/naive_mpi.c`).
 
 ## Parte B — Análisis y acercamientos (rúbrica ítems 3 y 4, 5 + 10 pts)
 1. Captura de pantalla: cifrado/descifrado de un texto sencillo con una
@@ -39,9 +39,12 @@
    - b. Llave `18014398509481983L` (2^56/4) — puede no terminar
    - c. Llave `18014398509481984L` (2^56/4 + 1)
    - d. Reflexión sobre el comportamiento del tiempo en función de la llave
-3. Descripción de los 2 acercamientos alternativos implementados:
-   - **Acercamiento 1** — Master-Worker dinámico (`src/approach1_mpi.c`)
-   - **Acercamiento 2** — Recorrido intercalado / striding (`src/approach2_mpi.c`)
+3. Descripción de los acercamientos alternativos implementados:
+   - **Acercamiento 1** — Master-Worker dinámico (`src/bruteforce/master_worker_mpi.c`)
+   - **Acercamiento 2** — Recorrido intercalado / striding (`src/bruteforce/striding_mpi.c`)
+   - **Acercamiento 3** — Partición contigua + shuffle pseudo-aleatorio
+     (`src/bruteforce/shuffled_mpi.c`)
+   - **Acercamiento 4** — Híbrido MPI + OpenMP (`src/bruteforce/hybrid_mpi_omp.c`)
 4. Diagramas de flujo / pseudocódigo de cada acercamiento.
 5. Pruebas con llaves fácil, media y difícil (fórmulas del enunciado,
    adaptadas al número de procesos usado), comparando naive vs.
@@ -62,9 +65,10 @@ Para cada función (`des_encrypt`, `des_decrypt`, `try_key`,
   generado por `scripts/benchmark.sh` como base).
 
 ## Extras (créditos adicionales opcionales)
-- Cluster MPI en 2+ máquinas (hasta 20%)
-- OpenMP + MPI híbrido (hasta 10%)
-- 3+ approaches adicionales (hasta 5%)
+- Cluster MPI en 2+ máquinas (hasta 20%) — pendiente.
+- OpenMP + MPI híbrido (hasta 10%) — implementado, `src/bruteforce/hybrid_mpi_omp.c`.
+- 3+ approaches adicionales (hasta 5%) — hay 4 alternativas implementadas
+  (master-worker, striding, shuffled, híbrido), cumple con holgura.
 
 ## Bibliografía
 (mínimo 3 citas relevantes y confiables)

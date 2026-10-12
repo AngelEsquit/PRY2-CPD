@@ -1,5 +1,5 @@
 /*
- * approach2_mpi.c
+ * striding_mpi.c
  * ---------------------------------------------------------------------
  * Acercamiento alternativo #2: recorrido intercalado ("striding").
  *
@@ -16,7 +16,7 @@
  * para el sondeo no bloqueante y MPI_Send/MPI_Wait para el aviso de
  * llave encontrada.
  *
- * Uso: mpirun -np <N> ./approach2_mpi <archivo_cifrado> <palabra_clave> <max_key>
+ * Uso: mpirun -np <N> ./striding_mpi <archivo_cifrado> <palabra_clave> <max_key>
  *
  * Proyecto 2 - Computación Paralela y Distribuida - UVG
  * ---------------------------------------------------------------------

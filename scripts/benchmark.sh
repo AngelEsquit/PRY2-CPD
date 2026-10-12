@@ -61,8 +61,10 @@ for i in "${!KEYS_NOMBRES[@]}"; do
   # `timeout` si sólo quiere evidenciar que no termina en tiempo
   # razonable.
   run_case "$nombre" "$llave" "naive_mpi"
-  run_case "$nombre" "$llave" "approach1_mpi"
-  run_case "$nombre" "$llave" "approach2_mpi"
+  run_case "$nombre" "$llave" "master_worker_mpi"
+  run_case "$nombre" "$llave" "striding_mpi"
+  run_case "$nombre" "$llave" "shuffled_mpi"
+  run_case "$nombre" "$llave" "hybrid_mpi_omp"
 done
 
 echo "Resultados guardados en $OUT_CSV"

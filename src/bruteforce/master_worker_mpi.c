@@ -1,5 +1,5 @@
 /*
- * approach1_mpi.c
+ * master_worker_mpi.c
  * ---------------------------------------------------------------------
  * Acercamiento alternativo #1: Master-Worker con bloques dinámicos.
  *
@@ -18,7 +18,7 @@
  *   TAG_STOP   (maestro -> trabajador): indica que ya no hay más trabajo
  *              (llave encontrada por otro trabajador o espacio agotado).
  *
- * Uso: mpirun -np <N> ./approach1_mpi <archivo_cifrado> <palabra_clave> <max_key> [chunk_size]
+ * Uso: mpirun -np <N> ./master_worker_mpi <archivo_cifrado> <palabra_clave> <max_key> [chunk_size]
  * (requiere N >= 2: 1 maestro + al menos 1 trabajador)
  *
  * Proyecto 2 - Computación Paralela y Distribuida - UVG
