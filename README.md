@@ -165,12 +165,28 @@ evidencia del Anexo 2).
   proceso sólo mantiene un único `MPI_Irecv` pendiente. `master_worker_mpi.c`
   no tiene este problema porque el maestro serializa todas las decisiones.
 
+### 5. Calcular speedup y eficiencia
+
+```bash
+python3 scripts/speedup.py resultados_benchmark.csv
+```
+
+Imprime una tabla de speedup/eficiencia por acercamiento y caso, y genera
+gráficas PNG en `results/` si `matplotlib` y `pandas` están instalados.
+
 ## Pendiente para completar el proyecto
 
-- [ ] Investigación y diagrama de flujo de DES (Parte A.1–A.2, en el informe).
-- [ ] Llenar `docs/informe_outline.md` con el contenido completo.
+- [x] Investigación y diagrama de flujo de DES (ver `docs/informe_outline.md`, secciones A.1–A.2).
+- [/] Llenar `docs/informe_outline.md` con el contenido completo (esqueleto terminado; faltan capturas de pantalla y datos de benchmark).
 - [ ] Correr `scripts/benchmark.sh` y capturar evidencia (Anexo 2).
 - [ ] (Extra) Cluster MPI en 2+ máquinas.
 - [x] (Extra) Versión híbrida con OpenMP (`hybrid_mpi_omp.c`).
 - [x] (Extra) Acercamientos adicionales: shuffle pseudo-aleatorio
       (`shuffled_mpi.c`) + híbrido MPI/OpenMP (2 de 3+ para el máximo extra).
+
+### Comandos útiles
+
+```bash
+make help        # muestra todos los targets disponibles
+make test-seq    # prueba de humo: cifra con llave=42 y la busca secuencialmente
+```
