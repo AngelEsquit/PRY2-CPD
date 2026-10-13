@@ -1,5 +1,34 @@
+# Binarios compilados
 bin/
+
+# Objetos intermedios
 *.o
+*.a
+
+# Archivos cifrados generados durante pruebas
 *.bin
+data/texto_cifrado.bin
+
+# Salida del benchmark
 resultados_benchmark.csv
+results/
+
+# Metadatos de Windows
 *:Zone.Identifier
+*.DS_Store
+
+# Editores
+.vscode/
+.idea/
+*.swp
+*~
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Logs
+*.log
