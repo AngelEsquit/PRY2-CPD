@@ -9,9 +9,13 @@ bin/
 *.bin
 data/texto_cifrado.bin
 
-# Salida del benchmark
-resultados_benchmark.csv
-results/
+# Auxiliares de LaTeX
+docs/*.aux
+docs/*.log
+docs/*.out
+docs/*.toc
+docs/*.fls
+docs/*.fdb_latexmk
 
 # Metadatos de Windows
 *:Zone.Identifier

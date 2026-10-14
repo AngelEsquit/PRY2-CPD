@@ -87,7 +87,7 @@ run_parallel() {
   local nombre="$1" llave="$2" programa="$3"
   if [ "$programa" = "hybrid_mpi_omp" ]; then
     run_one "$programa" "$NP" "$HILOS" "$nombre" "$llave" \
-      mpirun -np "$NP" "bin/$programa" "$CIPH" "$KEYWORD" "$MAX_KEY" "$HILOS"
+      mpirun --bind-to none -np "$NP" "bin/$programa" "$CIPH" "$KEYWORD" "$MAX_KEY" "$HILOS"
   else
     run_one "$programa" "$NP" 1 "$nombre" "$llave" \
       mpirun -np "$NP" "bin/$programa" "$CIPH" "$KEYWORD" "$MAX_KEY"
