@@ -1,21 +1,11 @@
-/*
- * descifrar.c
- * ---------------------------------------------------------------------
- * Utilidad para descifrar un archivo cifrado con DES, dada la llave
- * privada original. Imprime el texto resultante en pantalla (Parte
- * B.1: captura de pantalla evidenciando cifrado/descifrado correcto).
- *
- * Uso: ./descifrar <archivo_cifrado> <llave>
- *
- * Entradas:
- *   archivo_cifrado - ruta al archivo binario cifrado
- *   llave            - llave privada usada originalmente para cifrar
- * Salidas:
- *   Texto descifrado impreso en stdout.
- *
- * Proyecto 2 - Computación Paralela y Distribuida - UVG
- * ---------------------------------------------------------------------
- */
+/* descifrar.c -- descifra un archivo cifrado con DES-ECB e imprime el
+ * texto resultante (Parte B.1). Carga el binario cifrado tal cual (ya
+ * viene en múltiplos de 8 B desde cifrar.c) y aplica des_decrypt() con
+ * la misma llave usada para cifrar; si la llave es incorrecta, imprime
+ * igualmente el resultado (datos ilegibles), sin detectar el error por
+ * sí solo -- la validación de "llave correcta" la hace try_key() en el
+ * bruteforce, no este programa.
+ * Uso: ./descifrar <archivo_cifrado> <llave> */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,7 +25,7 @@ int main(int argc, char *argv[])
     size_t len;
     unsigned char *buf = load_and_pad_file(ciph_path, &len);
 
-    des_decrypt(key, buf, len);
+    des_decrypt(key, buf, len); /* descifra todo el buffer in-place, bloque a bloque */
 
     printf("Texto descifrado con llave %ld:\n", key);
     fwrite(buf, 1, len, stdout);

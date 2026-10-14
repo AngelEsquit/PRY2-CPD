@@ -129,6 +129,11 @@ int main(int argc, char *argv[])
     size_t len;
     unsigned char *ciph = load_and_pad_file(ciph_path, &len);
 
+    if (rank == 0) {
+        printf("Búsqueda shuffled en '%s' (palabra clave: \"%s\", rango [0, %ld], np=%d)...\n",
+               ciph_path, keyword, max_key, num_procs);
+    }
+
     /* Espacio de índices lógicos [0, N-1], N = max_key + 1, repartido en
      * bloques contiguos de igual tamaño (misma fórmula que naive_mpi.c). */
     long n = max_key + 1;

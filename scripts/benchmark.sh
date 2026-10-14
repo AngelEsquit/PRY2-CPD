@@ -29,16 +29,22 @@ OUT_CSV="resultados_benchmark.csv"
 echo "=== Benchmark Proyecto 2 — np=$NP $([ "$TIMEOUT_SECS" -gt 0 ] && echo ", timeout=${TIMEOUT_SECS}s" || echo "") ==="
 echo "programa,np,caso,llave,tiempo_segundos" > "$OUT_CSV"
 
-# Llaves de prueba definidas en el enunciado (Parte B.2 y B.5), asumiendo
-# un espacio de llaves de 2^56 y np=4. Ajustar si se usa otro np.
-KEYS_NOMBRES=(baseline_123456 dificil_no_termina justo_arriba facil media dificil)
+# Llaves de prueba (Parte B.5), usando un espacio efectivo reducido
+# EFFECTIVE_N en lugar de 2^56 real: a 2^56 ni la versión naive es
+# ejecutable en tiempo humano (requeriría años, sin importar cuántos
+# procesos se usen, porque el trabajo total sigue siendo O(N)). Se
+# mantienen las mismas fracciones del enunciado (N/2+1, N/2+N/8,
+# N/7+N/13) aplicadas sobre EFFECTIVE_N, preservando el fenómeno que se
+# quiere demostrar (posición de la llave dentro del segmento) con
+# tiempos de ejecución razonables. Ver discusión en el informe.
+EFFECTIVE_N=$((2**27))   # ~134M llaves; ajustar si se corre en hardware más lento/rápido
+
+KEYS_NOMBRES=(baseline_123456 facil media dificil)
 KEYS_VALORES=(
   123456
-  18014398509481983
-  18014398509481984
-  $(( (2**56)/2 + 1 ))
-  $(( (2**56)/2 + (2**56)/8 ))
-  $(( (2**56)/7 + (2**56)/13 + 1 ))
+  $(( EFFECTIVE_N/2 + 1 ))
+  $(( EFFECTIVE_N/2 + EFFECTIVE_N/8 ))
+  $(( EFFECTIVE_N/7 + EFFECTIVE_N/13 + 1 ))
 )
 
 run_seq() {
@@ -96,6 +102,19 @@ for i in "${!KEYS_NOMBRES[@]}"; do
   run_parallel   "$nombre" "$llave" "shuffled_mpi"
   run_parallel   "$nombre" "$llave" "hybrid_mpi_omp"
 done
+
+# -----------------------------------------------------------------------
+# NOTA sobre Parte B.2 (bordes de segmento, np=4, 2^56/4 y 2^56/4+1):
+# se dejó como análisis teórico en el informe (igual que lo plantea el
+# enunciado, en modo hipotético: "un algoritmo secuencial le hubiera
+# tomado..."). No se automatiza aquí una demo "en vivo" de esos bordes
+# porque, con un texto/keyword tan cortos, decrypts con llaves
+# incorrectas pueden coincidir por azar con la keyword buscada (falso
+# positivo) antes de llegar a la llave real, lo que vuelve el timing
+# de un caso de borde específico no reproducible de forma confiable.
+# Ver discusión de falsos positivos y colisiones de paridad DES en el
+# informe.
+# -----------------------------------------------------------------------
 
 echo ""
 echo "Resultados guardados en $OUT_CSV"

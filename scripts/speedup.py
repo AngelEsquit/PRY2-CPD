@@ -139,17 +139,23 @@ def try_plot(results: list[dict], out_dir: str) -> None:
         plt.close(fig)
         print(f"  Gráfica guardada: {fname}")
 
-    # Gráfica 2: Eficiencia por programa y caso
-    fig, ax = plt.subplots(figsize=(10, 5))
-    for prog in df["programa"].unique():
-        psub = df[df["programa"] == prog].groupby("np")["eficiencia"].mean().reset_index()
-        ax.plot(psub["np"], psub["eficiencia"], marker="s", label=prog)
-    ax.axhline(1.0, color="gray", linestyle="--", label="eficiencia ideal")
-    ax.set_title("Eficiencia promedio por acercamiento")
-    ax.set_xlabel("Número de procesos (np)")
+    # Gráfica 2: Eficiencia promedio por acercamiento (barras).
+    # NOTA: se usa un gráfico de barras, no una línea por np, porque todas
+    # las corridas de este proyecto se hicieron a un único np (ver
+    # 'resultados_benchmark.csv'); un gráfico de línea por np aquí
+    # implicaría falsamente una variación de np que no se midió.
+    eff_by_prog = df.groupby("programa")["eficiencia"].mean().sort_values(ascending=False)
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    bars = ax.bar(eff_by_prog.index, eff_by_prog.values, color="#4C72B0")
+    ax.bar_label(bars, fmt="%.2f", fontsize=8)
+    ax.axhline(1.0, color="gray", linestyle="--", label="eficiencia ideal (1.0)")
+    ax.set_title(f"Eficiencia promedio por acercamiento (np={df['np'].iloc[0]}, "
+                 f"promedio sobre {df['caso'].nunique()} casos)")
+    ax.set_xlabel("Acercamiento")
     ax.set_ylabel("Eficiencia (Speedup / np)")
-    ax.legend(fontsize=7)
-    ax.grid(True, linestyle=":")
+    ax.legend(fontsize=8)
+    ax.grid(True, axis="y", linestyle=":")
+    plt.setp(ax.get_xticklabels(), rotation=20, ha="right")
     fname = os.path.join(out_dir, "eficiencia_promedio.png")
     fig.savefig(fname, dpi=120, bbox_inches="tight")
     plt.close(fig)

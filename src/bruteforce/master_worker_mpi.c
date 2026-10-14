@@ -1,29 +1,13 @@
-/*
- * master_worker_mpi.c
- * ---------------------------------------------------------------------
- * Acercamiento alternativo #1: Master-Worker con bloques dinámicos.
- *
- * El proceso 0 actúa como maestro y no participa en la búsqueda; reparte
- * bloques pequeños ("chunk_size" llaves) del espacio total bajo demanda
- * a los procesos trabajadores (rank 1..N-1). Cuando un trabajador
- * termina su bloque, pide el siguiente. Esto evita que un solo proceso
- * quede "atascado" con un segmento grande mientras otros ya terminaron
- * el suyo (el problema central del acercamiento naive), reduciendo la
- * varianza del tiempo paralelo observado.
- *
- * Protocolo de mensajes:
- *   TAG_WORK   (maestro -> trabajador): un arreglo [inicio, fin] del
- *              siguiente bloque a procesar.
- *   TAG_RESULT (trabajador -> maestro): [llave_encontrada o -1, rank].
- *   TAG_STOP   (maestro -> trabajador): indica que ya no hay más trabajo
- *              (llave encontrada por otro trabajador o espacio agotado).
- *
+/* master_worker_mpi.c -- acercamiento alternativo #1: master-worker con
+ * bloques dinámicos. El rank 0 no busca: reparte bloques de 'chunk_size'
+ * llaves bajo demanda a los trabajadores (rank >= 1), que piden el
+ * siguiente bloque al terminar el suyo. Evita que un proceso quede
+ * atascado con un segmento grande (problema del naive), a costa de una
+ * ronda de mensajes por bloque. Mensajes: TAG_WORK [inicio,fin] maestro
+ * -> trabajador, TAG_RESULT [llave|-1, rank] trabajador -> maestro,
+ * TAG_STOP cuando ya no hay más trabajo.
  * Uso: mpirun -np <N> ./master_worker_mpi <archivo_cifrado> <palabra_clave> <max_key> [chunk_size]
- * (requiere N >= 2: 1 maestro + al menos 1 trabajador)
- *
- * Proyecto 2 - Computación Paralela y Distribuida - UVG
- * ---------------------------------------------------------------------
- */
+ * (requiere N >= 2) */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,6 +61,11 @@ int main(int argc, char *argv[])
 
     size_t len;
     unsigned char *ciph = load_and_pad_file(ciph_path, &len);
+
+    if (rank == 0) {
+        printf("Búsqueda master-worker en '%s' (palabra clave: \"%s\", rango [0, %ld], "
+               "np=%d, chunk=%ld)...\n", ciph_path, keyword, max_key, num_procs, chunk_size);
+    }
 
     double t0 = MPI_Wtime();
     long global_found = -1;

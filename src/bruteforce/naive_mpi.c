@@ -1,33 +1,10 @@
-/*
- * naive_mpi.c
- * ---------------------------------------------------------------------
- * Acercamiento "naive" paralelo con Open MPI (Parte B, basado en
- * bruteforce.c): el espacio de llaves [0, max_key] se divide en 'np'
- * segmentos contiguos de igual tamaño, uno por proceso, y cada proceso
- * recorre su segmento incrementalmente.
- *
- * Coordinación entre procesos:
- *   - Cada proceso posta, antes de iniciar su búsqueda, una recepción no
- *     bloqueante (MPI_Irecv) para el aviso de "llave encontrada" que
- *     pueda enviar cualquier otro proceso (MPI_ANY_SOURCE).
- *   - Cada CHECK_INTERVAL iteraciones se hace un MPI_Test para revisar,
- *     sin bloquear la búsqueda, si ya llegó ese aviso.
- *   - El proceso que encuentra la llave la notifica a todos los demás
- *     con MPI_Send (mensaje punto a punto por cada proceso).
- *   - Un proceso que agota su segmento sin encontrar nada, y sin haber
- *     recibido aviso, se bloquea con MPI_Wait a la espera del aviso de
- *     otro proceso (se asume que la llave sí existe en [0, max_key]).
- *
- * NOTA: este es el acercamiento base cuyo speedup es muy inconsistente
- * y depende fuertemente de en qué segmento caiga la llave solución
- * (ver discusión de la Parte B.2 del enunciado). Los acercamientos
- * alternativos están en master_worker_mpi.c y striding_mpi.c.
- *
- * Uso: mpirun -np <N> ./naive_mpi <archivo_cifrado> <palabra_clave> <max_key>
- *
- * Proyecto 2 - Computación Paralela y Distribuida - UVG
- * ---------------------------------------------------------------------
- */
+/* naive_mpi.c -- bruteforce MPI "naive" (Parte B): divide [0, max_key] en
+ * 'np' segmentos contiguos iguales, uno por proceso. Cada proceso busca
+ * en su segmento; MPI_Irecv/MPI_Test revisan periódicamente si otro
+ * proceso ya avisó (MPI_Send) haber encontrado la llave. Speedup muy
+ * inconsistente: depende de en qué segmento cae la llave (Parte B.2).
+ * Alternativas: master_worker_mpi.c, striding_mpi.c, shuffled_mpi.c.
+ * Uso: mpirun -np <N> ./naive_mpi <archivo_cifrado> <palabra_clave> <max_key> */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,6 +43,11 @@ int main(int argc, char *argv[])
 
     size_t len;
     unsigned char *ciph = load_and_pad_file(ciph_path, &len);
+
+    if (rank == 0) {
+        printf("Búsqueda naive en '%s' (palabra clave: \"%s\", rango [0, %ld], np=%d)...\n",
+               ciph_path, keyword, max_key, num_procs);
+    }
 
     /* División equitativa del espacio de búsqueda entre los procesos. */
     long range_size = (max_key + 1) / num_procs;

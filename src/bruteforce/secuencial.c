@@ -1,25 +1,6 @@
-/*
- * secuencial.c
- * ---------------------------------------------------------------------
- * Versión secuencial (sin MPI) del ataque de fuerza bruta sobre DES
- * (Parte A.3). Recorre el espacio de llaves [0, max_key] probando cada
- * una con try_key() hasta encontrar la que descifra el texto cifrado
- * conteniendo la palabra clave dada. Sirve como línea base para medir
- * el speedup de las versiones paralelas.
- *
- * Uso: ./secuencial <archivo_cifrado> <palabra_clave> <max_key>
- *
- * Entradas:
- *   archivo_cifrado - ruta al archivo binario cifrado
- *   palabra_clave    - substring que indica que el descifrado fue exitoso
- *   max_key          - límite superior del espacio de búsqueda (inclusive)
- * Salidas:
- *   Llave encontrada (o mensaje de no encontrada) y tiempo transcurrido,
- *   impresos en stdout.
- *
- * Proyecto 2 - Computación Paralela y Distribuida - UVG
- * ---------------------------------------------------------------------
- */
+/* secuencial.c -- fuerza bruta sin MPI (Parte A.3): recorre [0, max_key]
+ * probando cada llave con try_key(). Línea base para medir speedup.
+ * Uso: ./secuencial <archivo_cifrado> <palabra_clave> <max_key> */
 
 #include <stdio.h>
 #include <stdlib.h>

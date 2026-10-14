@@ -1,41 +1,38 @@
-/*
- * des.c
- * ---------------------------------------------------------------------
- * Implementación del wrapper de DES sobre libcrypto (OpenSSL).
- *
- * Técnica de conversión de llave: se distribuye la llave (un 'long' en
- * el rango [0, 2^56-1]) en un arreglo de 8 bytes, un byte por cada 8
- * bits, igual que el bruteforce.c de referencia (mpitutorial/Argonne).
- * DES_set_key_unchecked no valida ni fuerza la paridad de cada byte, y
- * el algoritmo DES internamente sólo usa 7 de los 8 bits de cada byte
- * para construir el key schedule (el bit restante es, tradicionalmente,
- * un bit de paridad). Por eso el espacio de llaves efectivo que se
- * recorre en este proyecto es de 2^56, tal como indica el enunciado.
- * ---------------------------------------------------------------------
- */
+/* des.c -- wrapper de DES sobre libcrypto (OpenSSL): cifrado, descifrado
+ * y verificación de llave (try_key) usados por todos los binarios. */
 
 #include "des.h"
 #include <openssl/des.h>
 #include <string.h>
 #include <stdlib.h>
 
-/* Convierte una llave 'long' al bloque de 8 bytes que espera DES. */
+/* Empaqueta 'lkey' (56 bits efectivos) en el bloque de 8 bytes que espera
+ * DES: 7 bits útiles por byte, bit 0 siempre en 0. DES_set_key_unchecked
+ * ignora el bit 0 de cada byte (paridad); si se usaran los 8 bits crudos,
+ * dos llaves que sólo difirieran en esos bits colisionarían al mismo key
+ * schedule (verificado: 777 y 520 colisionaban antes de este fix). */
 static void long_to_des_key(long lkey, DES_cblock *des_key)
 {
     unsigned char *key_bytes = (unsigned char *)des_key;
     for (int i = 0; i < 8; i++) {
-        key_bytes[i] = (unsigned char)(lkey & 0xFF);
-        lkey >>= 8;
+        unsigned char bits7 = (unsigned char)(lkey & 0x7F);
+        key_bytes[i] = (unsigned char)(bits7 << 1); /* bit 0 = 0 (paridad) */
+        lkey >>= 7;
     }
 }
 
+/* Cifra 'buf' in-place con DES-ECB y 'key'. 'len' debe ser múltiplo de 8
+ * (tamaño de bloque DES); se deriva un único key schedule de 'key' y se
+ * reutiliza para cifrar cada bloque de 8 bytes por separado (modo ECB:
+ * sin encadenamiento entre bloques, cada uno se cifra de forma
+ * independiente con la misma llave). */
 void des_encrypt(long key, unsigned char *buf, size_t len)
 {
     DES_cblock des_key;
     DES_key_schedule schedule;
 
     long_to_des_key(key, &des_key);
-    DES_set_key_unchecked(&des_key, &schedule);
+    DES_set_key_unchecked(&des_key, &schedule); /* deriva las 16 subllaves de ronda */
 
     for (size_t i = 0; i < len; i += 8) {
         DES_ecb_encrypt((DES_cblock *)(buf + i), (DES_cblock *)(buf + i),
@@ -43,6 +40,10 @@ void des_encrypt(long key, unsigned char *buf, size_t len)
     }
 }
 
+/* Descifra 'buf' in-place con DES-ECB y 'key': mismo key schedule que
+ * des_encrypt, pero las subllaves se aplican en orden inverso dentro de
+ * DES_ecb_encrypt (flag DES_DECRYPT) -- es la operación inversa exacta,
+ * bloque a bloque, de des_encrypt con la misma llave. */
 void des_decrypt(long key, unsigned char *buf, size_t len)
 {
     DES_cblock des_key;
@@ -57,23 +58,20 @@ void des_decrypt(long key, unsigned char *buf, size_t len)
     }
 }
 
+/* Prueba si 'key' descifra 'ciph' a un texto que contiene 'keyword'.
+ * Retorna 1 si coincide, 0 si no. Usada por el bruteforce en todas las
+ * versiones (secuencial y paralelas). */
 int try_key(long key, const unsigned char *ciph, size_t len, const char *keyword)
 {
-    /* Se trabaja sobre una copia temporal: 'ciph' nunca debe modificarse,
-     * pues cada intento de llave debe partir del mismo texto cifrado. */
     unsigned char *temp = malloc(len + 1);
     if (temp == NULL) {
-        /* Programación defensiva: si no hay memoria disponible, se
-         * reporta como intento fallido en lugar de abortar el programa
-         * en medio de una búsqueda distribuida. */
-        return 0;
+        return 0; /* sin memoria: se cuenta como intento fallido, no se aborta */
     }
 
-    memcpy(temp, ciph, len);
+    memcpy(temp, ciph, len); /* copia: nunca mutar 'ciph' entre intentos */
     temp[len] = '\0';
 
     des_decrypt(key, temp, len);
-
     int found = (strstr((char *)temp, keyword) != NULL);
 
     free(temp);

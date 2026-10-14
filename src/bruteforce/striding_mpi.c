@@ -60,6 +60,11 @@ int main(int argc, char *argv[])
     size_t len;
     unsigned char *ciph = load_and_pad_file(ciph_path, &len);
 
+    if (rank == 0) {
+        printf("Búsqueda striding en '%s' (palabra clave: \"%s\", rango [0, %ld], np=%d)...\n",
+               ciph_path, keyword, max_key, num_procs);
+    }
+
     long incoming_key = -1;
     MPI_Request recv_req;
     MPI_Irecv(&incoming_key, 1, MPI_LONG, MPI_ANY_SOURCE, TAG_FOUND,

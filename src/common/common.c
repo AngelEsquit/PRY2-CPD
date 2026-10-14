@@ -1,22 +1,20 @@
-/*
- * common.c
- * ---------------------------------------------------------------------
- * Implementación de utilidades compartidas: carga defensiva de archivos
- * y manejo centralizado de errores.
- * ---------------------------------------------------------------------
- */
+/* common.c -- utilidades compartidas: carga de archivos y errores. */
 
 #include "common.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+/* Imprime 'msg' como error y termina el proceso. */
 void die(const char *msg)
 {
     fprintf(stderr, "[ERROR] %s\n", msg);
     exit(ERR_EXIT);
 }
 
+/* Lee 'path' completo y lo rellena con espacios hasta el siguiente
+ * múltiplo de 8 (tamaño de bloque DES). Retorna el buffer (el caller
+ * debe hacer free) y su tamaño ya con padding en *out_len. */
 unsigned char *load_and_pad_file(const char *path, size_t *out_len)
 {
     if (path == NULL || out_len == NULL) {
