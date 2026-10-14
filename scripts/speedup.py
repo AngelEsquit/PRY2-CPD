@@ -4,7 +4,7 @@ speedup.py
 ----------
 Lee el CSV generado por scripts/benchmark.sh y calcula:
   - Speedup (T_secuencial / T_paralelo) para cada acercamiento y caso.
-  - Eficiencia (Speedup / np).
+  - Eficiencia (Speedup / (np * hilos)).
 
 Genera una tabla de resultados en stdout y, si matplotlib está disponible,
 guarda gráficas comparativas en results/.
@@ -31,6 +31,7 @@ def load_csv(path: str) -> list[dict]:
         reader = csv.DictReader(fh)
         for row in reader:
             row["np"] = int(row["np"])
+            row["hilos"] = int(row.get("hilos") or 1)
             row["tiempo_segundos"] = float(row["tiempo_segundos"])
             rows.append(row)
     return rows
@@ -60,11 +61,12 @@ def compute_speedups(rows: list[dict]) -> list[dict]:
             eficiencia = None
         else:
             speedup = t_seq / t_par
-            eficiencia = speedup / row["np"]
+            eficiencia = speedup / (row["np"] * row["hilos"])  # unidades de cómputo = procesos x hilos
 
         results.append({
             "programa":  row["programa"],
             "np":        row["np"],
+            "hilos":     row["hilos"],
             "caso":      row["caso"],
             "llave":     row["llave"],
             "t_seq":     t_seq,
@@ -121,42 +123,51 @@ def try_plot(results: list[dict], out_dir: str) -> None:
     os.makedirs(out_dir, exist_ok=True)
     df = pd.DataFrame(results).dropna(subset=["speedup"])
 
-    # Gráfica 1: Speedup por programa para cada caso
+    np_val = int(df["np"].iloc[0])
+    orden = ["naive_mpi", "master_worker_mpi", "striding_mpi", "shuffled_mpi", "hybrid_mpi_omp"]
+    colores = ["#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B3"]
+
+    # Gráfica 1: speedup por acercamiento para cada caso (barras, escala log:
+    # los speedups de naive/shuffled/híbrido varían por órdenes de magnitud
+    # según la posición de la llave, que es justo el fenómeno que se estudia).
     for caso in df["caso"].unique():
-        sub = df[df["caso"] == caso]
-        fig, ax = plt.subplots(figsize=(8, 4))
-        for prog in sub["programa"].unique():
-            psub = sub[sub["programa"] == prog].sort_values("np")
-            ax.plot(psub["np"], psub["speedup"], marker="o", label=prog)
-        ax.axline((0, 0), slope=1, color="gray", linestyle="--", label="speedup ideal")
-        ax.set_title(f"Speedup — caso: {caso}")
-        ax.set_xlabel("Número de procesos (np)")
-        ax.set_ylabel("Speedup")
+        sub = df[df["caso"] == caso].set_index("programa").reindex(orden).dropna(subset=["speedup"])
+        fig, ax = plt.subplots(figsize=(8, 4.2))
+        bars = ax.bar(sub.index, sub["speedup"], color=colores[: len(sub)])
+        ax.bar_label(bars, fmt="%.2f", fontsize=8)
+        ax.axhline(np_val, color="gray", linestyle="--", label=f"speedup ideal con np={np_val}")
+        ax.axhline(1.0, color="black", linestyle=":", linewidth=0.8, label="sin mejora (1.0)")
+        ax.set_yscale("log")
+        ax.set_title(f"Speedup por acercamiento — caso: {caso} (np={np_val})")
+        ax.set_ylabel("Speedup (T_seq / T_par), escala log")
         ax.legend(fontsize=7)
-        ax.grid(True, linestyle=":")
+        ax.grid(True, axis="y", linestyle=":")
+        plt.setp(ax.get_xticklabels(), rotation=20, ha="right", fontsize=8)
         fname = os.path.join(out_dir, f"speedup_{caso}.png")
         fig.savefig(fname, dpi=120, bbox_inches="tight")
         plt.close(fig)
         print(f"  Gráfica guardada: {fname}")
 
-    # Gráfica 2: Eficiencia promedio por acercamiento (barras).
-    # NOTA: se usa un gráfico de barras, no una línea por np, porque todas
-    # las corridas de este proyecto se hicieron a un único np (ver
-    # 'resultados_benchmark.csv'); un gráfico de línea por np aquí
-    # implicaría falsamente una variación de np que no se midió.
-    eff_by_prog = df.groupby("programa")["eficiencia"].mean().sort_values(ascending=False)
-    fig, ax = plt.subplots(figsize=(8, 4.5))
-    bars = ax.bar(eff_by_prog.index, eff_by_prog.values, color="#4C72B0")
-    ax.bar_label(bars, fmt="%.2f", fontsize=8)
+    # Gráfica 2: eficiencia por acercamiento y caso (grupos de barras, log).
+    # Eficiencia = speedup / (np * hilos). No se promedia entre casos: un
+    # solo caso con suerte posicional (p. ej. naive 222x) dominaría el
+    # promedio y ocultaría el comportamiento típico.
+    casos = [c for c in ["facil", "media", "dificil"] if c in set(df["caso"])]
+    fig, ax = plt.subplots(figsize=(8.5, 4.5))
+    ancho = 0.8 / max(len(casos), 1)
+    for j, caso in enumerate(casos):
+        sub = df[df["caso"] == caso].set_index("programa").reindex(orden)
+        xs = [i + j * ancho for i in range(len(orden))]
+        ax.bar(xs, sub["eficiencia"], width=ancho, label=caso)
+    ax.set_xticks([i + ancho * (len(casos) - 1) / 2 for i in range(len(orden))])
+    ax.set_xticklabels(orden, rotation=20, ha="right", fontsize=8)
     ax.axhline(1.0, color="gray", linestyle="--", label="eficiencia ideal (1.0)")
-    ax.set_title(f"Eficiencia promedio por acercamiento (np={df['np'].iloc[0]}, "
-                 f"promedio sobre {df['caso'].nunique()} casos)")
-    ax.set_xlabel("Acercamiento")
-    ax.set_ylabel("Eficiencia (Speedup / np)")
+    ax.set_yscale("log")
+    ax.set_ylabel("Eficiencia = speedup / (np x hilos), escala log")
+    ax.set_title(f"Eficiencia por acercamiento y caso (np={np_val})")
     ax.legend(fontsize=8)
     ax.grid(True, axis="y", linestyle=":")
-    plt.setp(ax.get_xticklabels(), rotation=20, ha="right")
-    fname = os.path.join(out_dir, "eficiencia_promedio.png")
+    fname = os.path.join(out_dir, "eficiencia_por_caso.png")
     fig.savefig(fname, dpi=120, bbox_inches="tight")
     plt.close(fig)
     print(f"  Gráfica guardada: {fname}")

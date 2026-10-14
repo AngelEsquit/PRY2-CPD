@@ -19,6 +19,23 @@
 \usepackage{fancyhdr}
 \usepackage{titlesec}
 \usepackage{caption}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric,arrows.meta,positioning,calc,fit}
+
+% Estilos TikZ compartidos por los diagramas de flujo
+\tikzset{
+    blk/.style={rectangle, draw, rounded corners=2pt, align=center,
+                minimum height=0.8cm, text width=3.6cm, font=\small, fill=blue!6},
+    io/.style={rectangle, draw, rounded corners=8pt, align=center,
+               minimum height=0.8cm, text width=3.6cm, font=\small, fill=green!10},
+    dec/.style={diamond, draw, aspect=2.2, align=center, inner sep=1pt,
+                font=\scriptsize, fill=yellow!15},
+    key/.style={rectangle, draw, rounded corners=2pt, align=center,
+                minimum height=0.8cm, text width=3.9cm, font=\small, fill=orange!12},
+    arr/.style={-{Stealth[length=2.5mm]}, thick},
+    msg/.style={-{Stealth[length=2.5mm]}, thick, color=red!70!black},
+    lbl/.style={font=\scriptsize, midway, fill=white, inner sep=1pt},
+}
 
 \hypersetup{
     colorlinks=true,
@@ -116,19 +133,10 @@ Además se implementó una versión híbrida que combina paso de mensajes
 dentro de cada proceso. Esto aprovecha los núcleos disponibles en cada
 nodo sin necesidad de lanzar un proceso MPI por núcleo.
 
-El análisis se centra en tres preguntas. Primero, ¿cómo se comporta el
-tiempo de búsqueda en cada acercamiento según la posición de la llave
-solución dentro del espacio de búsqueda? Segundo, ¿qué speedup y
-eficiencia se obtienen al aumentar el número de procesos o hilos?
-Tercero, ¿qué ventajas y costos tiene cada estrategia frente a las
-demás, en overhead de comunicación, balanceo de carga y complejidad de
-implementación? El resto de este documento sigue la estructura de la
-rúbrica del enunciado. La Parte A cubre los antecedentes conceptuales
-sobre DES y las primitivas de MPI utilizadas. La Parte B documenta
-cada acercamiento paralelo implementado, con su evidencia de
-funcionamiento y análisis de resultados. El documento cierra con las
-conclusiones, los anexos de catálogo de funciones y bitácora de
-pruebas, y la bibliografía consultada.
+El análisis responde tres preguntas: cómo cambia el tiempo según la
+posición de la llave, qué speedup y eficiencia se obtienen, y qué
+costos tiene cada estrategia. Las Partes A y B siguen la estructura de
+la rúbrica y el documento cierra con conclusiones, anexos y bibliografía.
 
 % =======================================================================
 \section{Parte A --- Antecedentes}
@@ -182,32 +190,62 @@ que una máquina dedicada podía romper DES en menos de 3 días. Hoy en
 día, hardware de propósito general con suficiente paralelismo puede
 reducir ese tiempo drásticamente.
 
+\clearpage
 \subsection{Diagrama de flujo del algoritmo DES}
+\label{sec:flujo-des}
 
-\begin{lstlisting}[frame=single, basicstyle=\ttfamily\footnotesize]
-Texto plano (64 bits)
-        |
-        v
-  Permutacion IP
-        |
-        v
-+----------------+
-|  L0   |   R0   |
-+----------------+
-        |  (x16 rondas)
-        v
-  Li = Ri-1
-  Ri = Li-1 XOR F(Ri-1, Ki)
-        |
-        v
-  Permutacion IP^-1
-        |
-        v
-Texto cifrado (64 bits)
+La Figura~\ref{fig:des-flujo} muestra el cifrado de un bloque de 64 bits
+(columna izquierda), la generación de subllaves (columna derecha) y el
+detalle de la función de ronda $F$ (parte inferior). Para descifrar se
+usa exactamente el mismo diagrama aplicando las subllaves en el orden
+$K_{16}, K_{15}, \ldots, K_1$.
 
-Funcion F:
-  Ri-1 -> Expansion E (32->48) -> XOR Ki -> 8 S-boxes -> Permutacion P
-\end{lstlisting}
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0.55cm]
+  % --- Columna de datos
+  \node[io] (pt) {Texto plano\\(64 bits)};
+  \node[blk, below=of pt] (ip) {Permutaci\'on inicial $IP$};
+  \node[blk, below=of ip] (split) {Divisi\'on del bloque\\$L_0$ (32 b) $\mid$ $R_0$ (32 b)};
+  \node[blk, below=of split, fill=blue!14, text width=4.6cm] (round)
+       {\textbf{Ronda $i = 1,\ldots,16$}\\
+        $L_i = R_{i-1}$\\
+        $R_i = L_{i-1} \oplus F(R_{i-1}, K_i)$};
+  \node[blk, below=of round] (swap) {Intercambio final\\$(R_{16}\,\Vert\,L_{16})$};
+  \node[blk, below=of swap] (ipinv) {Permutaci\'on final $IP^{-1}$};
+  \node[io, below=of ipinv] (ct) {Texto cifrado\\(64 bits)};
+  \foreach \a/\b in {pt/ip, ip/split, split/round, round/swap, swap/ipinv, ipinv/ct}
+      \draw[arr] (\a) -- (\b);
+  % bucle de rondas
+  \draw[arr] (round.east) -- ++(0.55,0) |- node[lbl, pos=0.25, right]{$i<16$} (round.north east |- split.south east) ;
+
+  % --- Columna de subllaves
+  \node[io, right=3.6cm of pt] (k64) {Llave (64 bits)\\56 \'utiles + 8 paridad};
+  \node[key, below=of k64] (pc1) {$PC\text{-}1$: descarta paridad\\$\to$ 56 bits};
+  \node[key, below=of pc1] (cd) {Divisi\'on $C_0$ (28 b) $\mid$ $D_0$ (28 b)};
+  \node[key, below=of cd] (rot) {Rotaci\'on circular a la izquierda\\de $C_i$, $D_i$ (1 o 2 posiciones)};
+  \node[key, below=of rot] (pc2) {$PC\text{-}2$: selecci\'on\\$\to$ subllave $K_i$ (48 bits)};
+  \foreach \a/\b in {k64/pc1, pc1/cd, cd/rot, rot/pc2}
+      \draw[arr] (\a) -- (\b);
+  \draw[arr] (pc2.west) -- node[lbl, above]{$K_i$} (round.east |- pc2.west) -- (round.east);
+  \draw[arr] (rot.east) -- ++(0.5,0) |- node[lbl, pos=0.25, right]{$\times 16$} (cd.east);
+
+  % --- Funcion F
+  \node[io, below=1.4cm of ct, xshift=-4.2cm, text width=2.6cm] (fin) {$R_{i-1}$ (32 bits)};
+  \node[key, right=0.5cm of fin, text width=2.4cm] (e) {Expansi\'on $E$\\32 $\to$ 48 bits};
+  \node[key, right=0.5cm of e, text width=2.0cm] (x) {XOR con $K_i$\\(48 bits)};
+  \node[key, right=0.5cm of x, text width=2.4cm] (sb) {8 S-boxes\\6 $\to$ 4 bits c/u};
+  \node[key, right=0.5cm of sb, text width=2.0cm] (p) {Permutaci\'on $P$\\(32 bits)};
+  \foreach \a/\b in {fin/e, e/x, x/sb, sb/p}
+      \draw[arr] (\a) -- (\b);
+  \node[font=\small\bfseries, above=0.5cm of x] (ftitle) {Funci\'on $F(R_{i-1}, K_i)$};
+  \node[draw, dashed, fit=(fin)(e)(x)(sb)(p)(ftitle), inner sep=6pt] {};
+\end{tikzpicture}
+\caption{Diagrama de flujo de DES: cifrado de un bloque, generaci\'on de
+subllaves y funci\'on de ronda $F$.}
+\label{fig:des-flujo}
+\end{figure}
+\clearpage
 
 \subsection{Resultados de la versión secuencial}
 \label{sec:secuencial}
@@ -219,23 +257,27 @@ todas las versiones paralelas.
 
 \begin{table}[H]
 \centering
-\begin{tabular}{lll}
+\small
+\begin{tabular}{lrrr}
 \toprule
-\textbf{max\_key} & \textbf{Tiempo (s)} & \textbf{Observaciones} \\
+\textbf{Llave buscada} & \textbf{Iteraciones} & \textbf{Tiempo (s)} & \textbf{Tasa (llaves/s)} \\
 \midrule
-123{,}456 & 0.047 & Caso base (Parte B.2) \\
-67{,}108{,}865 ($N/2+1$, $N=2^{27}$) & 20.915 & Caso ``fácil'' (Parte B.5) \\
-83{,}886{,}080 ($N/2+N/8$) & 26.134 & Caso ``media'' (Parte B.5) \\
-29{,}498{,}402 ($N/7+N/13+1$) & 9.211 & Caso ``difícil'' (Parte B.5) \\
+123{,}456 (base, Parte B.2)               & 123{,}457    & 0.039  & $3.17\times10^{6}$ \\
+67{,}108{,}865 ($N/2+1$, fácil)          & 67{,}108{,}866 & 20.890 & $3.21\times10^{6}$ \\
+83{,}886{,}080 ($N/2+N/8$, media)        & 83{,}886{,}081 & 26.097 & $3.21\times10^{6}$ \\
+29{,}498{,}402 ($N/7+N/13+1$, difícil)   & 29{,}498{,}403 & 9.197  & $3.21\times10^{6}$ \\
 \bottomrule
 \end{tabular}
-\caption{Tiempos de la versión secuencial, medidos con
-\texttt{scripts/benchmark.sh} (ver \texttt{resultados\_benchmark.csv}).
-Nótese que ``difícil'' es más rápido que ``fácil''/``media'' en términos
-absolutos: el nombre de cada caso describe qué tan favorable es la
-posición de la llave \emph{dentro de su segmento} para el acercamiento
-naive (Sección~\ref{sec:b2}), no el tamaño absoluto de \texttt{max\_key}
-recorrido por la versión secuencial.}
+\caption{Versión secuencial, $N=2^{27}$ (\texttt{scripts/benchmark.sh},
+\texttt{resultados\_benchmark.csv}). La secuencial prueba las llaves en
+orden y se detiene al encontrar la correcta, así que hace
+exactamente \textit{llave}$+1$ iteraciones, y su tiempo es
+\textit{iteraciones}$/$\textit{tasa} con una tasa constante de
+$\approx3.21\times10^{6}$ llaves/s. Por eso la tabla es lineal: sirve
+como línea base ($T_{seq}$) y para medir la tasa, no como análisis.
+Los nombres fácil/media/difícil describen qué tan favorable es la llave
+para naive con 4 procesos (Sección~\ref{sec:comparativa}), no para la
+secuencial, para la cual la llave más grande es la más lenta.}
 \label{tab:secuencial}
 \end{table}
 
@@ -252,6 +294,7 @@ quiere observar, la posición relativa dentro del segmento, con tiempos
 de ejecución de segundos en lugar de décadas.
 
 \subsection{Evidencia de correcto funcionamiento del wrapper DES}
+\label{sec:des-wrapper}
 
 Se verificó el correcto funcionamiento del wrapper de cifrado/descifrado
 ejecutando el ciclo completo de cifrar y luego descifrar con la misma
@@ -276,12 +319,11 @@ de 8 bytes a razón de 7 bits útiles por byte, con el bit 0 siempre en
 \texttt{DES\_set\_key\_unchecked}. Esta función, a diferencia de
 \texttt{DES\_set\_key}, no valida ni fuerza los bits de paridad.
 
-Este empaquetado de 7 bits por byte no es la forma obvia de hacerlo.
-Empaquetar los 8 bits crudos sería más directo, y de hecho fue el
-diseño original. El cambio a 7 bits fue el resultado de corregir un
-bug real detectado durante las pruebas (ver Sección~\ref{sec:b2} para
-el detalle de la colisión que lo motivó). El espacio efectivo
-recorrido en este proyecto es, en consecuencia, de $2^{56}$ llaves
+Se empaquetan sólo 7 bits por byte porque DES ignora el bit menos
+significativo de cada byte (paridad): con los 8 bits crudos, llaves que
+difieren sólo en esos bits darían el mismo \textit{key schedule}. Así
+cada valor de \texttt{long} en $[0, 2^{56}-1]$ corresponde a una llave
+DES distinta, y el espacio efectivo recorrido es de $2^{56}$ llaves
 distinguibles, como indica el enunciado.
 
 \subsection{Explicación de rutinas clave}
@@ -291,24 +333,63 @@ Las siguientes rutinas de \texttt{src/common/} son compartidas por los
 bruteforce). Su detalle de entradas/salidas se amplía en el Anexo 1
 (Sección~\ref{sec:anexo1}).
 
-\begin{table}[H]
+
+\subsubsection*{Funcionamiento de cada rutina}
+
+\paragraph{\texttt{des\_encrypt} / \texttt{des\_decrypt} (equivalentes a \texttt{encrypt}/\texttt{decrypt} de \texttt{rpc/des\_crypt.h}).}
+Reciben la llave como entero \texttt{long} y un buffer cuya longitud es
+múltiplo de 8~B. Primero \texttt{long\_to\_des\_key} empaqueta la llave
+en un bloque de 8 bytes (7 bits útiles por byte, bit de paridad en 0).
+Luego \texttt{DES\_set\_key\_unchecked} calcula el \textit{key schedule}
+(las 16 subllaves de la Figura~\ref{fig:des-flujo}) una sola vez, y
+\texttt{DES\_ecb\_encrypt} procesa cada bloque de 8~B de forma
+independiente (modo ECB) modificando el buffer \textit{in-place}. El
+descifrado es idéntico pero con el flag \texttt{DES\_DECRYPT}, que
+aplica las subllaves en orden inverso.
+
+\paragraph{\texttt{try\_key} (equivalente a \texttt{tryKey}).}
+Decide si una llave candidata es la correcta. Descifra una \textit{copia}
+del texto cifrado y verifica si el resultado contiene la palabra clave
+(Figura~\ref{fig:trykey}). Es la rutina que se ejecuta $N$ veces en la
+búsqueda, por lo que domina el costo total: a la tasa medida son
+$\approx 3.2\times10^{6}$ llamadas por segundo por núcleo.
+
+\paragraph{\texttt{memcpy}.}
+Copia \texttt{len} bytes de \texttt{ciph} a un buffer temporal
+\texttt{temp}. Es necesaria porque \texttt{des\_decrypt} trabaja
+\textit{in-place}: sin la copia, el primer intento destruiría el texto
+cifrado y los intentos siguientes descifrarían basura. Se reserva
+\texttt{len+1} bytes para poder escribir un \texttt{'\textbackslash0'} al final.
+
+\paragraph{\texttt{strstr}.}
+Recorre \texttt{temp} buscando la primera aparición de \texttt{keyword}
+y devuelve un puntero a ella o \texttt{NULL}. Como opera sobre cadenas
+terminadas en \texttt{'\textbackslash0'}, el terminador explícito
+\texttt{temp[len]=0} es indispensable. Con una llave incorrecta el
+descifrado produce bytes pseudo-aleatorios, y la probabilidad de que
+contengan por azar la frase de 16 caracteres es $\approx 2^{-128}$ por
+posición, es decir, despreciable.
+
+\begin{figure}[H]
 \centering
-\small
-\begin{tabular}{p{3cm}p{4.2cm}p{6.5cm}}
-\toprule
-\textbf{Función} & \textbf{Entradas} & \textbf{Salida / Efecto} \\
-\midrule
-\texttt{des\_encrypt} & \texttt{key} (long), \texttt{buf}, \texttt{len} & Cifra \texttt{buf} in-place (ECB, bloques de 8 B) \\
-\texttt{des\_decrypt} & \texttt{key} (long), \texttt{buf}, \texttt{len} & Descifra \texttt{buf} in-place \\
-\texttt{try\_key} & \texttt{key}, \texttt{ciph}, \texttt{len}, \texttt{keyword} & Retorna 1 si \texttt{keyword} aparece en el texto descifrado \\
-\texttt{load\_and\_pad\_file} & \texttt{path}, \texttt{out\_len} & Carga archivo y aplica padding a múltiplo de 8 B \\
-\texttt{die} & \texttt{msg} & Imprime error en \texttt{stderr} y termina con código \texttt{ERR\_EXIT} \\
-\texttt{memcpy} (en \texttt{try\_key}) & \texttt{dst}, \texttt{src}, \texttt{n} & Copia \texttt{n} bytes; evita mutar el buffer \texttt{ciph} original \\
-\texttt{strstr} & \texttt{haystack}, \texttt{needle} & Busca \texttt{needle} en \texttt{haystack}; retorna puntero o \texttt{NULL} \\
-\bottomrule
-\end{tabular}
-\caption{Rutinas clave reutilizadas por todos los acercamientos.}
-\end{table}
+\begin{tikzpicture}[node distance=0.45cm]
+  \node[io, text width=6cm] (in) {Entrada: \texttt{key}, \texttt{ciph}, \texttt{len}, \texttt{keyword}};
+  \node[blk, text width=6cm, below=of in] (m) {\texttt{temp = malloc(len+1)}};
+  \node[dec, below=of m] (d) {\texttt{temp == NULL?}};
+  \node[io, right=1.6cm of d, text width=2.6cm] (r0) {\texttt{return 0}};
+  \node[blk, text width=6cm, below=0.7cm of d] (cp) {\texttt{memcpy(temp, ciph, len)}\\\texttt{temp[len] = '\textbackslash0'}};
+  \node[blk, text width=6cm, below=of cp] (dc) {\texttt{des\_decrypt(key, temp, len)}\\{\scriptsize (key schedule + DES\_ecb\_encrypt por bloque)}};
+  \node[blk, text width=6cm, below=of dc] (ss) {\texttt{found = (strstr(temp, keyword) != NULL)}};
+  \node[blk, text width=6cm, below=of ss] (fr) {\texttt{free(temp)}};
+  \node[io, text width=6cm, below=of fr] (rt) {\texttt{return found}\ (1 = llave correcta, 0 = no)};
+  \draw[arr] (in)--(m); \draw[arr] (m)--(d);
+  \draw[arr] (d)--node[lbl,above]{s\'i}(r0);
+  \draw[arr] (d)--node[lbl,right]{no}(cp);
+  \draw[arr] (cp)--(dc); \draw[arr] (dc)--(ss); \draw[arr] (ss)--(fr); \draw[arr] (fr)--(rt);
+\end{tikzpicture}
+\caption{Diagrama de flujo de \texttt{try\_key}.}
+\label{fig:trykey}
+\end{figure}
 
 \subsection{Primitivas MPI utilizadas}
 \label{sec:mpi-primitivas}
@@ -335,6 +416,40 @@ mensajes descrito por Gropp, Lusk y Skjellum (2014).
 \end{tabular}
 \caption{Primitivas de Open MPI utilizadas a través de los distintos acercamientos.}
 \end{table}
+
+\subsubsection*{Flujo de comunicación de \texttt{MPI\_Irecv}, \texttt{MPI\_Send} y \texttt{MPI\_Wait}}
+
+\texttt{MPI\_Irecv} no bloquea: se postea antes de buscar y devuelve un manejador. \texttt{MPI\_Test} consulta sin bloquear (cada 100\,000 iteraciones). \texttt{MPI\_Send} lo ejecuta quien encuentra la llave, una vez por cada otro proceso. \texttt{MPI\_Wait} bloquea hasta completar la solicitud pendiente (Figura~\ref{fig:mpi-flujo}).
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm]
+  % ejes de vida
+  \foreach \x/\n in {0/{Proceso $P_j$\\(encuentra la llave)}, 6/{Proceso $P_i$\\(sigue buscando)}, 11/{Proceso $P_k$\\(agot\'o su segmento)}}
+     { \node[draw, rounded corners=2pt, fill=blue!8, align=center, font=\small] (h\x) at (\x,0) {\n};
+       \draw[dashed, gray] (\x,-0.6) -- (\x,-10.2); }
+  % pasos
+  \foreach \x in {0,6,11}
+     \node[font=\scriptsize, fill=green!12, draw, rounded corners=1pt] at (\x,-1.2) {\texttt{MPI\_Irecv} (no bloquea)};
+  \node[font=\scriptsize, align=center, fill=yellow!15, draw] at (0,-2.6) {busca...\\\texttt{try\_key}($k$)=1};
+  \node[font=\scriptsize, align=center, fill=yellow!15, draw] at (6,-2.0) {busca...\\\texttt{MPI\_Test}: flag=0};
+  \node[font=\scriptsize, align=center, fill=yellow!15, draw] at (11,-2.0) {segmento agotado};
+  \node[font=\scriptsize, fill=green!12, draw, rounded corners=1pt] at (11,-3.2) {\texttt{MPI\_Wait} (bloquea)};
+  \draw[msg] (0,-4.2) -- node[lbl, above]{\texttt{MPI\_Send}(llave)} (6,-4.6);
+  \draw[msg] (0,-4.7) -- node[lbl, above, pos=0.6]{\texttt{MPI\_Send}(llave)} (11,-5.1);
+  \node[font=\scriptsize, align=center, fill=yellow!15, draw] at (6,-5.8) {\texttt{MPI\_Test}: flag=1\\$\to$ detiene la b\'usqueda};
+  \node[font=\scriptsize, fill=green!12, draw, rounded corners=1pt] at (11,-5.9) {\texttt{MPI\_Wait} retorna};
+  \node[font=\scriptsize, align=center, fill=green!12, draw, rounded corners=1pt] at (0,-6.0) {\texttt{MPI\_Cancel(req)}\\\texttt{MPI\_Wait(req)}};
+  \node[font=\scriptsize, fill=green!12, draw, rounded corners=1pt] at (6,-7.0) {\texttt{MPI\_Wait} (libera \texttt{req})};
+  \foreach \x in {0,6,11}
+     \node[font=\scriptsize, fill=orange!15, draw, rounded corners=1pt] at (\x,-8.4) {\texttt{MPI\_Reduce} (tiempo m\'ax., llave)};
+  \foreach \x in {0,6,11}
+     \node[font=\scriptsize, fill=gray!15, draw, rounded corners=1pt] at (\x,-9.6) {\texttt{MPI\_Finalize}};
+\end{tikzpicture}
+\caption{Flujo de comunicación del aviso de ``llave encontrada'' (acercamientos naive, striding, shuffled e híbrido).
+El maestro del acercamiento master-worker usa \texttt{MPI\_Send}/\texttt{MPI\_Recv} bloqueantes con las etiquetas \texttt{TAG\_WORK}, \texttt{TAG\_RESULT} y \texttt{TAG\_STOP}.}
+\label{fig:mpi-flujo}
+\end{figure}
 
 % =======================================================================
 \section{Parte B --- Análisis y acercamientos paralelos}
@@ -368,27 +483,45 @@ prueba de''} con el acercamiento naive y 4 procesos MPI.
 \subsubsection*{a) Llave 123456}
 \begin{lstlisting}[language=bash]
 bin/cifrar data/texto.txt data/texto_cifrado.bin 123456
-mpirun -np 4 bin/naive_mpi data/texto_cifrado.bin "es una prueba de" 123456
+mpirun -np 4 bin/naive_mpi data/texto_cifrado.bin "es una prueba de" 72057594037927935
 \end{lstlisting}
-Tiempo esperado: muy rápido, ya que la llave cae en el primer cuarto
-del espacio de búsqueda (el segmento asignado al proceso 0).
+\textbf{Resultado medido:} llave encontrada en \textbf{0.094 s} (tiempo
+paralelo interno, \texttt{MPI\_Wtime}). La llave cae en el primer
+segmento del espacio $[0, 2^{56}-1]$, a unas 123\,456 iteraciones del
+inicio del proceso 0.
 
 \subsubsection*{b) Llave 18014398509481983 ($2^{56}/4$, borde entre procesos 0 y 1)}
 \begin{lstlisting}[language=bash]
-mpirun -np 4 bin/naive_mpi data/texto_cifrado.bin "es una prueba de" 18014398509481983
+bin/cifrar data/texto.txt data/texto_cifrado.bin 18014398509481983
+mpirun -np 4 bin/naive_mpi data/texto_cifrado.bin "es una prueba de" 72057594037927935
 \end{lstlisting}
 Este caso cae al final del segmento del proceso 0. Es el peor caso
 posible para esa llave dentro de su segmento, así que el tiempo de
 ejecución se aproxima al de la versión secuencial completa sobre un
 cuarto del espacio.
 
+\textbf{Resultado medido:} no termina. Se interrumpió a los 20 s con
+\texttt{timeout}, como anticipa el enunciado. El proceso~0 debe recorrer
+$2^{54}\approx1.8\times10^{16}$ llaves, que a $3.2\times10^{6}$
+llaves/s son unos 180 años.
+
 \subsubsection*{c) Llave 18014398509481984 ($2^{56}/4 + 1$)}
 \begin{lstlisting}[language=bash]
-mpirun -np 4 bin/naive_mpi data/texto_cifrado.bin "es una prueba de" 18014398509481984
+bin/cifrar data/texto.txt data/texto_cifrado.bin 18014398509481984
+mpirun -np 4 bin/naive_mpi data/texto_cifrado.bin "es una prueba de" 72057594037927935
 \end{lstlisting}
 Al estar justo al inicio del segmento del proceso 1, este caso produce
 un speedup artificialmente alto. El proceso 1 encuentra la llave casi
 de inmediato.
+
+\textbf{Resultado medido:} llave encontrada en \textbf{0.031 s}. Un
+algoritmo secuencial habría necesitado $2^{56}/4+1$ iteraciones,
+así que el speedup aparente es astronómico (y engañoso), tal como
+advierte el enunciado.
+
+\textbf{Nota:} en (a), (b) y (c) \texttt{max\_key} es $2^{56}-1$
+(72057594037927935) para que el rango se divida en cuatro bloques de
+$2^{54}$ llaves.
 
 \subsubsection*{d) Reflexión sobre el comportamiento}
 
@@ -406,45 +539,56 @@ acercamientos alternativos descritos a continuación. Todos buscan
 reducir la dependencia entre la posición de la llave y el tiempo de
 descubrimiento.
 
-\textbf{Nota metodológica.} Los casos (b) y (c) de este inciso se
-analizan de forma teórica, siguiendo el mismo planteamiento hipotético
-del enunciado (``un algoritmo secuencial le hubiera tomado...''). No se
-ejecutan literalmente a escala $2^{56}$ real. A la tasa medida de
-$\approx 3.2 \times 10^{6}$ llaves/segundo, un caso como $2^{56}/4$
-requeriría años de ejecución incluso paralelizado entre 4 procesos,
-porque el trabajo total sigue siendo $O(N)$. Las mediciones reales se
-concentran en los casos fácil/media/difícil de la Parte B.5
-(Sección~\ref{sec:comparativa}), donde se usa un espacio reducido
-$N_{\text{ef}} = 2^{27}$ que permite ejecuciones completas,
-reproducibles y verificadas (Figura~\ref{fig:b3todos}).
-
-\paragraph{Hallazgo y corrección: colisiones por el bit de paridad de DES.}
-Durante el desarrollo, pruebas con llaves pequeñas y conocidas
-mostraron que distintos valores numéricos de llave podían hacer que el
-bruteforce reportara una llave \emph{incorrecta} como solución. Por
-ejemplo, cifrando con llave 777 y buscando hasta 2000, el programa
-reportaba haber encontrado la llave 520. La causa era la
-implementación original de \texttt{long\_to\_des\_key}
-(\texttt{src/common/des.c}), que empaquetaba los 8 bits de cada byte
-de la llave directamente. Pero \texttt{DES\_set\_key\_unchecked} ignora
-el bit menos significativo de cada byte (bit de paridad) al construir
-el \textit{key schedule}. Esto significa que dos valores de llave que
-sólo diferían en esos 8 bits ignorados generaban el mismo
-\textit{key schedule} y, por tanto, el mismo texto descifrado. Es una
-colisión determinista, no un falso positivo aleatorio.
-
-Se corrigió empaquetando únicamente 7 bits útiles de la llave por
-byte, dejando el bit de paridad siempre en 0. Esto garantiza una
-biyección entre el índice de búsqueda y el \textit{key schedule}
-efectivo. Tras la corrección, se re-verificó con el mismo caso (777
-vs. 2000) y con el espacio reducido completo de la Parte B.5,
-confirmando que cada ejecución encuentra exactamente la llave usada
-para cifrar sin colisiones (ver Figura~\ref{fig:b3todos}). Todos los
-resultados de este informe, incluyendo las Tablas~\ref{tab:secuencial},
-\ref{tab:comparativa} y \ref{tab:speedup}, se generaron ya con el
-código corregido.
+El caso (b) no se puede ejecutar completo: el trabajo total sigue siendo
+$O(N)$, y a $3.2\times10^{6}$ llaves/s son años aun con 4 procesos. Por eso
+las comparaciones fácil/media/difícil (Sección~\ref{sec:comparativa})
+usan un espacio reducido $N_{\text{ef}}=2^{27}$.
 
 \subsection{Acercamientos alternativos}
+
+\subsubsection*{Referencia: acercamiento naive}
+\texttt{src/bruteforce/naive\_mpi.c} divide $[0, \texttt{max\_key}]$ en
+$np$ segmentos contiguos de igual tamaño. La Figura~\ref{fig:particion}
+compara cómo cada acercamiento reparte las llaves entre 4 procesos.
+
+\begin{lstlisting}
+Para cada proceso (rank r de np):
+  tam   <- (max_key + 1) / np
+  inicio <- r * tam ;  fin <- (r == np-1) ? max_key : inicio + tam - 1
+  MPI_Irecv(aviso)                       # aviso de "llave encontrada"
+  para key desde inicio hasta fin:
+    si try_key(key): MPI_Send(key) a los demas; MPI_Cancel(aviso); terminar
+    si (key - inicio) % CHECK_INTERVAL == 0 y MPI_Test(aviso): terminar
+  si se agoto el segmento: MPI_Wait(aviso)   # espera a quien la tenga
+  MPI_Reduce(tiempo maximo, llave) hacia rank 0
+\end{lstlisting}
+
+\begin{figure}[H]
+\centering
+\resizebox{0.9\textwidth}{!}{\begin{tikzpicture}[x=1cm, y=0.8cm]
+  \tikzset{cell/.style={draw, minimum height=0.5cm, inner sep=0pt, font=\scriptsize, anchor=west}}
+  \node[anchor=east, font=\small] at (-0.2,0) {Naive};
+  \foreach \i/\c in {0/blue!25, 1/green!25, 2/orange!30, 3/red!25}
+     \node[cell, fill=\c, minimum width=3.9cm] at (\i*3.9,0) {P\i: bloque contiguo};
+  \node[anchor=east, font=\small] at (-0.2,-1) {Striding};
+  \foreach \i/\p/\c in {0/0/blue!25,1/1/green!25,2/2/orange!30,3/3/red!25,4/0/blue!25,5/1/green!25,6/2/orange!30,7/3/red!25,8/0/blue!25,9/1/green!25,10/2/orange!30,11/3/red!25,12/0/blue!25,13/1/green!25,14/2/orange!30,15/3/red!25}
+     \node[cell, fill=\c, minimum width=0.975cm] at (\i*0.975,-1) {P\p};
+  \node[anchor=east, font=\small] at (-0.2,-2) {Shuffled};
+  \foreach \i/\c in {0/blue!25, 1/green!25, 2/orange!30, 3/red!25}
+     \node[cell, fill=\c, minimum width=3.9cm] at (\i*3.9,-2) {P\i: $(a\cdot idx+b)\bmod N$};
+  \node[anchor=east, font=\small] at (-0.2,-3) {Master-worker};
+  \foreach \i/\p/\c in {0/1/blue!25,1/2/green!25,2/3/orange!30,3/1/blue!25,4/2/green!25,5/3/orange!30,6/2/green!25,7/1/blue!25,8/3/orange!30,9/2/green!25,10/1/blue!25,11/3/orange!30}
+     \node[cell, fill=\c, minimum width=1.3cm] at (\i*1.3,-3) {W\p};
+  \node[anchor=east, font=\small] at (-0.2,-4) {H\'ibrido};
+  \foreach \i/\c in {0/blue!25, 1/green!25, 2/orange!30, 3/red!25}
+     \node[cell, fill=\c, minimum width=3.9cm] at (\i*3.9,-4) {P\i: bloque $\to$ hilos};
+\end{tikzpicture}}
+\caption{Reparto del espacio de llaves $[0, N-1]$ (de izquierda a derecha) entre 4 procesos.
+Cada color es un proceso (en master-worker, un trabajador; el rank 0 solo coordina).
+En striding los colores se alternan llave a llave; en master-worker, bloque a bloque y bajo demanda;
+en shuffled cada bloque contiguo de \'indices se dispersa por todo el espacio.}
+\label{fig:particion}
+\end{figure}
 
 \subsubsection{Acercamiento 1 --- Master-Worker dinámico}
 \label{sec:masterworker}
@@ -611,15 +755,26 @@ correcta de forma consistente.}
 \subsection{Comparativa de tiempos (fácil / media / difícil)}
 \label{sec:comparativa}
 
-Siguiendo la metodología descrita en el enunciado, se definieron tres
-casos de prueba (fácil, media y difícil) usando las mismas fracciones
-propuestas en el enunciado pero aplicadas sobre un espacio efectivo
-reducido $N_{\text{ef}}=2^{27}$ (ver Sección~\ref{sec:secuencial}), y
-se ejecutó cada uno de los seis programas (secuencial + 5 versiones
-paralelas) sobre cada caso con $np=4$. Los resultados completos,
-obtenidos con \texttt{scripts/benchmark.sh} y resumidos con
-\texttt{scripts/speedup.py}, se encuentran en el
-Anexo~\ref{sec:anexo2} y en \texttt{resultados\_benchmark.csv}.
+Siguiendo la metodología del enunciado, se definieron tres llaves
+(fácil, media y difícil) con las mismas fracciones propuestas pero
+aplicadas sobre un espacio efectivo reducido $N_{\text{ef}}=2^{27}$ (ver
+Sección~\ref{sec:secuencial}). \textbf{El espacio de búsqueda es el
+mismo para los tres casos} ($\texttt{max\_key}=2^{27}-1$), de modo que
+lo único que cambia es la posición de la llave, tal como plantea el
+enunciado. Se ejecutó cada uno de los seis programas (secuencial + 5
+paralelos) con $np=4$ y, para el híbrido, 2 hilos por proceso (8
+hilos en total). Los tiempos son los que imprime cada programa
+(\texttt{MPI\_Wtime} o reloj interno), es decir, el tiempo de búsqueda
+sin el arranque de \texttt{mpirun}. El tiempo de pared del comando
+completo se conserva en la columna \texttt{tiempo\_wall\_segundos} del
+CSV; difiere en $\approx1.5$\,s por el lanzamiento de MPI. Cada punto
+es una sola corrida (no hay repeticiones). Los resultados completos
+están en el Anexo~\ref{sec:anexo2} y en
+\texttt{resultados\_benchmark.csv}.
+
+Con $np=4$ y bloques de $2^{27}/4$ llaves, la llave fácil es la primera del
+bloque del proceso~2, la media está a la mitad de ese bloque y la
+difícil ($\approx0.22N$) al 88\,\% del bloque del proceso~0.
 
 \begin{table}[H]
 \centering
@@ -628,13 +783,14 @@ Anexo~\ref{sec:anexo2} y en \texttt{resultados\_benchmark.csv}.
 \toprule
 \textbf{Caso} & \textbf{Secuencial} & \textbf{Naive} & \textbf{Master-W.} & \textbf{Striding} & \textbf{Shuffled} & \textbf{Híbrido} \\
 \midrule
-Fácil   & 20.915 & 6.718 & 8.496 & 6.754 & 6.280 & 4.872 \\
-Media   & 26.134 & 8.015 & 10.221 & 8.087 & 2.647 & 5.783 \\
-Difícil & 9.211  & 3.793 & 4.579 & 3.794 & 2.464 & 2.987 \\
+Base (123\,456) & 0.039 & 0.156 & 0.016 & 0.063 & 7.903 & 0.152 \\
+Fácil           & 20.890 & 0.094 & 6.934 & 5.270 & 0.878 & 0.191 \\
+Media           & 26.097 & 5.299 & 8.640 & 6.594 & 3.286 & 3.483 \\
+Difícil         & 9.197  & 9.244 & 3.078 & 2.364 & 8.761 & 6.015 \\
 \bottomrule
 \end{tabular}
-\caption{Tiempos de ejecución (s) por caso y acercamiento, $np=4$
-($N_{\text{ef}}=2^{27}$, \texttt{hybrid\_mpi\_omp} con 2 hilos por
+\caption{Tiempo de búsqueda (s) por caso y acercamiento, $np=4$,
+espacio fijo $2^{27}$ (\texttt{hybrid\_mpi\_omp} con 2 hilos por
 proceso). Fuente: \texttt{resultados\_benchmark.csv}.}
 \label{tab:comparativa}
 \end{table}
@@ -642,88 +798,121 @@ proceso). Fuente: \texttt{resultados\_benchmark.csv}.}
 \begin{table}[H]
 \centering
 \small
-\begin{tabular}{p{2.6cm}p{3.3cm}p{2.6cm}p{5.5cm}}
+\begin{tabular}{p{2.6cm}p{3.6cm}p{3.6cm}p{3.5cm}}
 \toprule
-\textbf{Acercamiento} & \textbf{Speedup (fácil/media/difícil)} & \textbf{Eficiencia} & \textbf{Observación} \\
+\textbf{Acercamiento} & \textbf{Speedup (fácil / media / difícil)} & \textbf{Eficiencia (fácil / media / difícil)} & \textbf{Divisor de eficiencia} \\
 \midrule
-Naive           & 3.11 / 3.26 / 2.43  & 0.78 / 0.82 / 0.61 & Razonablemente estable en este muestreo \\
-Master-worker   & 2.46 / 2.56 / 2.01  & 0.62 / 0.64 / 0.50 & El más lento de los 5 en todos los casos \\
-Striding        & 3.10 / 3.23 / 2.43  & 0.77 / 0.81 / 0.61 & Muy similar a naive en este muestreo \\
-Shuffled        & 3.33 / 9.87 / 3.74  & 0.83 / 2.47 / 0.94 & Mejor tiempo absoluto en los 3 casos \\
-Híbrido (2 hilos) & 4.29 / 4.52 / 3.08 & 1.07 / 1.13 / 0.77 & Supera a naive puro con el mismo \texttt{np} en los 3 casos \\
+Naive           & 222.9 / 4.92 / 0.99 & 55.7 / 1.23 / 0.25 & $np=4$ \\
+Master-worker   & 3.01 / 3.02 / 2.99  & 0.75 / 0.76 / 0.75 & $np=4$ \\
+Striding        & 3.96 / 3.96 / 3.89  & 0.99 / 0.99 / 0.97 & $np=4$ \\
+Shuffled        & 23.8 / 7.94 / 1.05  & 5.9 / 1.99 / 0.26  & $np=4$ \\
+Híbrido (2 hilos) & 109.2 / 7.49 / 1.53 & 13.6 / 0.94 / 0.19 & $np\times$hilos $=8$ \\
 \bottomrule
 \end{tabular}
-\caption{Speedup y eficiencia respecto a la versión secuencial, por
-acercamiento y caso (calculado con \texttt{scripts/speedup.py}).}
+\caption{Speedup ($T_{seq}/T_{par}$) y eficiencia (speedup dividido
+entre las unidades de cómputo) respecto a la versión secuencial
+(calculado con \texttt{scripts/speedup.py}).}
 \label{tab:speedup}
 \end{table}
 
-Tres observaciones saltan a la vista en la Tabla~\ref{tab:speedup}.
+\subsubsection*{Modelo analítico del tiempo paralelo}
+\label{sec:modelo}
 
-Primero, el caso ``difícil'' fue pensado para ser el más lento, pero
-resulta en la práctica el más rápido en términos absolutos para todos
-los acercamientos (Tabla~\ref{tab:comparativa}). Su \texttt{max\_key}
-es numéricamente menor que el de fácil/media, así que el espacio total
-a recorrer es menor incluso si la llave cae en una posición
-relativamente desfavorable dentro de su segmento. Esto confirma la
-observación de la Sección~\ref{sec:b2}: lo que hace ``difícil'' a un
-caso no es el tamaño absoluto de \texttt{max\_key}, sino la posición
-relativa de la llave dentro de su segmento. En este diseño de prueba
-en particular, el efecto de la posición no alcanzó a compensar la
-diferencia en tamaño absoluto entre los tres \texttt{max\_key} usados.
-Es una limitación a tener en cuenta si se repite este experimento,
-usando un \texttt{max\_key} fijo e igual para los tres casos y
-variando sólo la posición de la llave dentro de ese rango fijo.
+Los resultados se pueden predecir sin ejecutar nada. Sea $k$ la llave,
+$N$ el tamaño del espacio, $p$ el número de procesos, $B=N/p$ el tamaño
+del bloque y $r\approx3.21\times10^{6}$ llaves/s la tasa medida de un
+núcleo (Tabla~\ref{tab:secuencial}). El tiempo paralelo es el del
+proceso que encuentra la llave, es decir, las iteraciones que le toca
+hacer hasta llegar a ella, divididas entre $r$:
 
-Segundo, se observan eficiencias por encima de 1.0 (speedup
-superlineal) en shuffled en el caso media (2.47) y en híbrido en los
-casos fácil y media (1.07 y 1.13). Esto es consistente con el overhead
-fijo de arranque de MPI (\texttt{MPI\_Init}, carga del ejecutable en 4
-procesos), que a esta escala reducida es comparable al tiempo total de
-búsqueda. No representa una ganancia real de eficiencia, sino un
-efecto esperable al trabajar con $N_{\text{ef}}$ mucho menor que
-$2^{56}$.
+\begin{center}
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Acercamiento} & \textbf{Iteraciones hasta hallar $k$} & \textbf{Speedup} \\
+\midrule
+Secuencial & $k+1$ & $1$ \\
+Naive & $k-\lfloor k/B\rfloor B+1$ (posición dentro de su bloque) & $\dfrac{k+1}{k-\lfloor k/B\rfloor B+1}$, entre $1$ y $\approx k$ \\
+Striding & $\approx k/p$ (todos avanzan al mismo ritmo) & $\approx p$ \\
+Master-worker & $\approx k/(p-1)$ (el maestro no busca) & $\approx p-1$ \\
+Shuffled & $idx-\lfloor idx/B\rfloor B+1$, con $idx=a^{-1}(k-b)\bmod N$ & depende de $idx$ \\
+\bottomrule
+\end{tabular}
+\end{center}
 
-Tercero, master-worker resultó consistentemente el más lento de los 5
-acercamientos en los tres casos. Con \texttt{chunk\_size}=50{,}000 y
-un espacio de $N_{\text{ef}}=2^{27}$, cada proceso agota su primer
-bloque y pide más al maestro con relativa frecuencia. Esa ronda
-adicional de mensajes por bloque (Sección~\ref{sec:masterworker}) pesa
-más, en proporción, que en un espacio de búsqueda mayor donde los
-bloques representarían una fracción más pequeña del trabajo total.
+La Tabla~\ref{tab:modelo} compara este modelo con las mediciones
+(las llaves de naive y shuffled se calcularon con los mismos $a$ y
+$b$ que usa el programa).
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lcccccccc}
+\toprule
+ & \multicolumn{2}{c}{\textbf{Naive}} & \multicolumn{2}{c}{\textbf{Striding}} & \multicolumn{2}{c}{\textbf{Master-W.}} & \multicolumn{2}{c}{\textbf{Shuffled}} \\
+\textbf{Caso} & pred. & med. & pred. & med. & pred. & med. & pred. & med. \\
+\midrule
+Base    & 0.038 & 0.156 & 0.010 & 0.063 & 0.013 & 0.016 & 7.81 & 7.90 \\
+Fácil   & $\approx0$ & 0.094 & 5.23 & 5.27 & 6.97 & 6.93 & 0.80 & 0.88 \\
+Media   & 5.23 & 5.30 & 6.53 & 6.59 & 8.71 & 8.64 & 3.19 & 3.29 \\
+Difícil & 9.19 & 9.24 & 2.30 & 2.36 & 3.06 & 3.08 & 8.64 & 8.76 \\
+\bottomrule
+\end{tabular}
+\caption{Tiempo paralelo predicho por el modelo vs. medido (s), $np=4$, $N=2^{27}$.}
+\label{tab:modelo}
+\end{table}
+
+Las predicciones coinciden con lo medido (diferencias de $\approx$1--3\,\%
+cuando el tiempo es de varios segundos). Los desvíos en las filas de
+tiempos muy pequeños (naive 0.038 vs. 0.156) son un costo fijo de
+$\approx0.1$\,s de aviso y cierre entre procesos
+(\texttt{MPI\_Send}/\texttt{MPI\_Wait}), que el modelo no incluye. Esto
+significa que los resultados no son casualidad ni ruido: están
+determinados por la posición de la llave. El híbrido no se incluye
+porque no sigue el modelo: con 2 hilos esperaríamos la mitad del tiempo
+de naive (2.6\,s en media, 4.6\,s en difícil) y se midió 3.5\,s y
+6.0\,s; no se investigó la causa.
+
+\paragraph{Qué implica para el tiempo paralelo esperado.} Si la llave es
+uniforme en $[0,N)$, la posición dentro del bloque de naive es uniforme
+en $[0,B)$, así que su tiempo esperado es $B/2=N/(2p)$ iteraciones. El de
+striding es $E[k]/p=N/(2p)$. \textbf{Los dos tienen el mismo tiempo
+esperado y el mismo peor caso ($N/p$)}. Lo que cambia es la dispersión
+del speedup: naive depende de la posición (de $\approx1$ a $\approx k$),
+mientras que striding da $\approx p$ siempre. Master-worker tiene un
+tiempo esperado peor en un factor $p/(p-1)$ en una sola máquina
+homogénea, y su ventaja (balancear nodos de distinta velocidad) no se
+midió. Shuffled convierte el speedup de naive en una variable
+pseudo-aleatoria sin mejorar su valor medio.
+
+Observaciones sobre la Tabla~\ref{tab:speedup}:
+
+\begin{itemize}
+    \item \textbf{Naive} va de 222.9 a 0.99 según dónde caiga la llave,
+    exactamente el fenómeno del enunciado. Su eficiencia $>1$ es suerte
+    posicional, no ganancia paralela.
+    \item \textbf{Striding} es el único consistente: $\approx np$ (3.96,
+    3.96, 3.89) sin importar la llave. A cambio nunca tiene el golpe de
+    suerte de naive (fácil: 5.27\,s vs. 0.094\,s).
+    \item \textbf{Master-worker} rinde $np-1\approx3.0$: el rank~0 sólo
+    coordina. El costo de los mensajes (un bloque de 50\,000 llaves son
+    $\approx16$\,ms de cómputo) es pequeño frente a esa pérdida.
+    \item \textbf{Shuffled} no elimina la varianza, la aleatoriza: 23.8,
+    7.94 y 1.05; con la llave base tarda 7.9\,s, unas 200 veces más que la
+    secuencial.
+    \item \textbf{Híbrido} conserva los bloques contiguos de naive (109,
+    7.49, 1.53). Es $1.5\times$ más rápido que naive en media y difícil,
+    y más lento en fácil (0.19 vs. 0.094\,s, ambos de fracción de segundo).
+    Con 2 hilos se esperaría $2\times$; no se investigó la causa.
+\end{itemize}
 
 \begin{figure}[H]
 \centering
-\begin{minipage}{0.48\textwidth}
-\centering
-\includegraphics[width=\textwidth]{../results/speedup_facil.png}
-\caption{Speedup por acercamiento, caso ``fácil''.}
-\label{fig:speedup-facil}
-\end{minipage}
-\hfill
-\begin{minipage}{0.48\textwidth}
-\centering
-\includegraphics[width=\textwidth]{../results/speedup_media.png}
-\caption{Speedup por acercamiento, caso ``media''.}
-\label{fig:speedup-media}
-\end{minipage}
-\end{figure}
-
-\begin{figure}[H]
-\centering
-\begin{minipage}{0.48\textwidth}
-\centering
-\includegraphics[width=\textwidth]{../results/speedup_dificil.png}
-\caption{Speedup por acercamiento, caso ``difícil''.}
-\label{fig:speedup-dificil}
-\end{minipage}
-\hfill
-\begin{minipage}{0.48\textwidth}
-\centering
-\includegraphics[width=\textwidth]{../results/eficiencia_promedio.png}
-\caption{Eficiencia promedio por acercamiento sobre los tres casos.}
-\label{fig:eficiencia}
-\end{minipage}
+\includegraphics[width=0.32\textwidth]{../results/speedup_facil.png}
+\includegraphics[width=0.32\textwidth]{../results/speedup_media.png}
+\includegraphics[width=0.32\textwidth]{../results/speedup_dificil.png}
+\caption{Speedup por acercamiento (escala log), $np=4$: caso fácil, media y difícil.}
+\label{fig:speedup}
 \end{figure}
 
 % =======================================================================
@@ -733,17 +922,11 @@ bloques representarían una fracción más pequeña del trabajo total.
 \subsection*{Retos encontrados y lecciones aprendidas}
 
 El reto técnico más significativo no estuvo en la paralelización en
-sí, sino en la representación de la llave. Durante las pruebas se
-descubrió que el wrapper original sobre DES tenía una colisión
-determinista. Dos valores numéricos de llave distintos podían producir
-el mismo \textit{key schedule} porque se ignoraba el bit de paridad de
-cada byte (Sección~\ref{sec:b2}). Esto se detectó por accidente, al
-intentar construir un caso de prueba reproducible, y obligó a revisar
-y corregir \texttt{long\_to\_des\_key} antes de confiar en cualquier
-medición de tiempos. La lección concreta es que en un proyecto de
-bruteforce, verificar primero que el espacio de búsqueda es realmente
-biyectivo con las llaves numéricas usadas es tan importante como
-paralelizar bien la búsqueda.
+sí, sino en la representación de la llave: DES ignora el bit de paridad
+de cada byte, así que los 56 bits de la llave numérica se empaquetan a
+razón de 7 por byte para que cada valor corresponda a una llave DES
+distinta (Sección~\ref{sec:des-wrapper}). En un bruteforce conviene
+verificar esa correspondencia uno a uno antes de medir tiempos.
 
 El segundo reto fue de escala. El enunciado define los casos
 fácil/media/difícil como fracciones de $2^{56}$, pero a la tasa de
@@ -753,6 +936,11 @@ un espacio efectivo reducido ($N_{\text{ef}} = 2^{27}$) que preserva
 el fenómeno de interés, la posición relativa dentro del segmento, con
 tiempos de ejecución manejables (Sección~\ref{sec:secuencial}). Es una
 decisión de diseño experimental, no un atajo que invalide el análisis.
+
+El tercer reto fue el diseño de las pruebas: el espacio de búsqueda debe
+ser el mismo en todos los casos y variar sólo la posición de la llave, y
+el tiempo debe medirse dentro del programa (el arranque de
+\texttt{mpirun} añade $\approx1.5$\,s al tiempo de pared).
 
 Por último, se aprendió que con un texto de prueba y palabra clave tan
 cortos, un descifrado con la llave incorrecta puede, por azar,
@@ -764,60 +952,41 @@ futura del proyecto, por ejemplo usando una frase clave más larga o
 verificando un segundo criterio de coincidencia.
 
 \begin{itemize}
-    \item \textbf{Varianza del naive, teoría vs. evidencia empírica.}
-    El caso analítico de la Sección~\ref{sec:b2} es la demostración más
-    clara de la varianza del naive. Con $np=4$, la misma
-    \texttt{max\_key} produce un speedup de $\approx 1$ si la llave cae
-    al final del segmento del proceso 0, pero de
-    $\approx 4.5\times 10^{15}$ si cae al inicio del segmento del
-    proceso 1. Es una diferencia de 15 órdenes de magnitud explicada
-    únicamente por la posición, no por el algoritmo. Sin embargo, al
-    calcular el coeficiente de variación (desviación estándar sobre
-    media) del tiempo paralelo de cada acercamiento sobre los 3 casos
-    empíricos de la Tabla~\ref{tab:comparativa}, los números cuentan
-    una historia más matizada. Naive y striding obtienen exactamente
-    el mismo CV (0.35), y shuffled obtiene un CV mayor (0.57) que el
-    propio naive, a pesar de ser el más rápido en tiempo absoluto.
-    \textbf{En esta muestra de 3 casos, striding no demuestra
-    empíricamente menor variabilidad que naive.} El efecto de
-    reducción de varianza es real y demostrable en el caso extremo
-    analítico, pero no se manifestó de forma medible con solo 3 puntos
-    de prueba a la escala $N_{\text{ef}}=2^{27}$ usada aquí. Una
-    validación más rigurosa de esta hipótesis requeriría muchas más
-    corridas con llaves aleatorias uniformemente distribuidas en el
-    espacio, no sólo 3 casos curados por posición relativa.
-    \item \textbf{Overhead de comunicación.} El acercamiento
-    master-worker introduce tráfico MPI adicional, una ronda de
-    mensajes por cada bloque consumido. Esto puede reducir su
-    eficiencia relativa frente a striding o shuffled en sistemas con
-    alta latencia de red, especialmente si el \texttt{chunk\_size}
-    elegido es demasiado pequeño.
-    \item \textbf{Beneficio del híbrido.} La combinación MPI + OpenMP
-    permite aprovechar la memoria compartida dentro de cada nodo para
-    repartir trabajo entre hilos sin el costo de lanzar un proceso MPI
-    adicional por núcleo. Esto reduce la presión sobre la red y el
-    overhead de inicialización de MPI por proceso. En las pruebas de
-    la Tabla~\ref{tab:speedup}, el híbrido con 2 hilos por proceso
-    obtuvo mayor speedup que la versión naive pura con el mismo
-    \texttt{np} en los tres casos: 4.29 vs. 3.11 en fácil, 4.52 vs.
-    3.26 en media, 3.08 vs. 2.43 en difícil. Es consistente en los
-    tres, lo que satisface el criterio de ``speedup consistente''
-    pedido para el extra de OpenMP. El acercamiento shuffled resultó,
-    sin embargo, el más rápido en términos absolutos de los 5 en los
-    tres casos (Tabla~\ref{tab:comparativa}). El beneficio del híbrido
-    debe interpretarse específicamente frente a su contraparte sin
-    OpenMP (naive), no como el mejor acercamiento general de este
-    muestreo.
-    \item \textbf{Limitación práctica de DES.} El espacio efectivo de
-    $2^{56}$ llaves hace que una fuerza bruta completa sea
-    computacionalmente inviable en hardware de uso común dentro de un
-    tiempo razonable. A la tasa medida en esta máquina serían
-    $\approx$ 71 años (Sección~\ref{sec:secuencial}). Por esta razón,
-    las pruebas de este proyecto se realizaron sobre un espacio
-    efectivo reducido ($N_{\text{ef}} = 2^{27} \approx 1.34 \times
-    10^8$, Sección~3.4), suficiente para medir y comparar el speedup
-    relativo entre acercamientos sin requerir tiempos de ejecución
-    excesivos.
+    \item \textbf{Varianza del naive: teoría y evidencia.} El caso
+    analítico de la Sección~\ref{sec:b2} lo muestra en el extremo: con
+    $np=4$ y $2^{56}$ llaves, la misma \texttt{max\_key} da un speedup de
+    $\approx1$ si la llave está al final del bloque del proceso~0 y de
+    $\approx4.5\times10^{15}$ si está al inicio del bloque del
+    proceso~1. Los casos medidos a escala $2^{27}$ lo confirman: naive
+    va de 222.9 a 0.99 (coeficiente de variación del speedup entre los
+    tres casos: 1.36). Striding, en cambio, da 3.96, 3.96 y 3.89
+    (CV 0.01). Son sólo tres llaves por acercamiento y una corrida por
+    punto, por lo que el CV es ilustrativo, no una prueba estadística;
+    una validación rigurosa requeriría muchas llaves aleatorias.
+    \item \textbf{Compromiso entre consistencia y suerte (Sección~\ref{sec:modelo}).} Naive y
+    shuffled (CV 0.87) pueden ganar mucho o nada según dónde esté la
+    llave; striding y master-worker rinden siempre lo mismo
+    ($\approx np$ y $\approx np-1$). El modelo analítico
+    muestra que naive y striding tienen el mismo tiempo paralelo esperado
+    ($N/2p$ iteraciones) y el mismo peor caso; la mejora de striding
+    es de \textit{consistencia} (speedup $\approx p$ para cualquier
+    llave), no de tiempo esperado. Si se busca predecibilidad,
+    striding es la mejor opción medida aquí; el costo es renunciar a los casos
+    de ``suerte''.
+    \item \textbf{Overhead de comunicación.} Master-worker envía un
+    mensaje por bloque, pero su speedup de $\approx3.0$ se explica por
+    tener un núcleo menos buscando. Con un \texttt{chunk\_size} mucho
+    menor o más latencia podría pesar más; no se midió.
+    \item \textbf{Beneficio del híbrido.} Combinar MPI con OpenMP
+    permite usar la memoria compartida dentro de cada nodo sin lanzar un
+    proceso MPI por núcleo. Frente a naive con el mismo $np$, el
+    híbrido con 2 hilos fue $1.5\times$ más rápido en los casos media y
+    difícil (Tabla~\ref{tab:comparativa}); en el caso fácil fue más
+    lento (0.19 vs. 0.094\,s) porque ambos terminan en una fracción de
+    segundo. La mejora es consistente donde hay trabajo real, pero menor que el
+    $2\times$ esperable, y su eficiencia sobre 8 hilos es 0.94 (media) y
+    0.19 (difícil, donde sigue limitado por el bloque del proceso~0).
+    El extra de OpenMP se cumple de forma parcial, y conviene decirlo así.
     \item \textbf{Recomendación.} Para trabajo futuro, valdría la pena
     extender las pruebas a un cluster MPI de 2+ máquinas físicas (ver
     extras del enunciado), para observar cómo se comportan estos
@@ -829,7 +998,7 @@ En conclusión, el programa base funciona correctamente de principio a
 fin. Recibe el texto plano desde archivo, lo cifra con una llave
 arbitraria pasada por parámetro, y las seis variantes de búsqueda
 (secuencial y cinco paralelas) recuperan exactamente esa misma llave,
-sin colisiones ni falsos positivos tras la corrección descrita arriba.
+sin colisiones ni falsos positivos.
 Todas imprimen la llave encontrada, el archivo de entrada y la palabra
 clave usada en cada corrida (Secciones~\ref{sec:b1}
 y~\ref{sec:comparativa}).
@@ -877,6 +1046,56 @@ y~\ref{sec:comparativa}).
     \item \textbf{Descripción:} imprime \texttt{[ERROR] msg} en \texttt{stderr} y termina el proceso con el código de error del proyecto.
 \end{itemize}
 
+\subsubsection*{\texttt{long\_to\_des\_key} --- \texttt{src/common/des.c} (privada)}
+\small\texttt{static void long\_to\_des\_key(long lkey, DES\_cblock *des\_key)}\normalsize
+\begin{itemize}[nosep]
+    \item \textbf{Entradas:} \texttt{lkey} (long, llave de 56 bits), \texttt{des\_key} (puntero a bloque de 8 bytes a llenar).
+    \item \textbf{Salidas:} escribe en \texttt{*des\_key} 8 bytes; cada uno contiene 7 bits de \texttt{lkey} desplazados una posición, con el bit de paridad en 0.
+    \item \textbf{Descripción:} garantiza que a cada valor de \texttt{lkey} le corresponda un \textit{key schedule} distinto (Sección~\ref{sec:des-wrapper}).
+\end{itemize}
+
+\subsubsection*{\texttt{next\_block\_end} --- \texttt{src/bruteforce/master\_worker\_mpi.c} (privada)}
+\small\texttt{static long next\_block\_end(long next\_key, long chunk\_size, long max\_key)}\normalsize
+\begin{itemize}[nosep]
+    \item \textbf{Entradas:} \texttt{next\_key} (primera llave del bloque), \texttt{chunk\_size} (tamaño del bloque), \texttt{max\_key} (límite del espacio).
+    \item \textbf{Salidas:} \texttt{long} --- última llave del bloque, \texttt{min(next\_key + chunk\_size - 1, max\_key)}.
+    \item \textbf{Descripción:} evita que el último bloque exceda el espacio de búsqueda.
+\end{itemize}
+
+\subsubsection*{\texttt{gcd}, \texttt{mulmod}, \texttt{find\_coprime\_multiplier} --- \texttt{src/bruteforce/shuffled\_mpi.c} (privadas)}
+\small\texttt{static long gcd(long a, long b)}\quad
+\texttt{static long mulmod(long a, long b, long n)}\quad
+\texttt{static long find\_coprime\_multiplier(long n)}\normalsize
+\begin{itemize}[nosep]
+    \item \textbf{Entradas:} \texttt{a}, \texttt{b} (enteros no negativos), \texttt{n} (tamaño del espacio, $N=\texttt{max\_key}+1$).
+    \item \textbf{Salidas:} \texttt{gcd} devuelve el máximo común divisor (algoritmo de Euclides); \texttt{mulmod} devuelve $(a\cdot b) \bmod n$; \texttt{find\_coprime\_multiplier} devuelve el menor $a\ge$ semilla con $\gcd(a,n)=1$.
+    \item \textbf{Descripción:} \texttt{mulmod} usa \texttt{\_\_int128} como acumulador porque $a\cdot b$ puede superar los 64 bits cuando $n\approx2^{56}$. Un $a$ coprimo con $n$ es condición necesaria y suficiente para que $key(idx)=(a\cdot idx+b)\bmod n$ sea una biyección en $[0,n-1]$.
+\end{itemize}
+
+\subsubsection*{Programas ejecutables (\texttt{main})}
+Todos validan el número de argumentos y que \texttt{max\_key} $\ge 0$,
+y terminan con \texttt{ERR\_EXIT} (=1) si no se cumplen. Los archivos
+inexistentes o vacíos terminan vía \texttt{die()} dentro de
+\texttt{load\_and\_pad\_file}.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{p{3.3cm}p{5.6cm}p{5.0cm}}
+\toprule
+\textbf{Programa} & \textbf{Entradas (\texttt{argv})} & \textbf{Salidas (stdout)} \\
+\midrule
+\texttt{cifrar} & \texttt{archivo\_entrada} (char*), \texttt{archivo\_salida} (char*), \texttt{llave} (long) & Escribe el cifrado en \texttt{archivo\_salida}; imprime llave y bytes escritos \\
+\texttt{descifrar} & \texttt{archivo\_cifrado} (char*), \texttt{llave} (long) & Imprime el texto descifrado \\
+\texttt{secuencial} & \texttt{archivo\_cifrado}, \texttt{palabra\_clave} (char*), \texttt{max\_key} (long) & Archivo y palabra usados, \texttt{Llave encontrada: k}, tiempo (s) \\
+\texttt{naive\_mpi}, \texttt{striding\_mpi}, \texttt{shuffled\_mpi} & igual que \texttt{secuencial}; \texttt{np} vía \texttt{mpirun -np} & igual, con el tiempo máximo entre procesos (\texttt{MPI\_Reduce}) \\
+\texttt{master\_worker\_mpi} & igual $+$ \texttt{chunk\_size} (long, opcional, 50\,000); requiere $np\ge2$ & igual \\
+\texttt{hybrid\_mpi\_omp} & igual $+$ \texttt{nthreads} (int, opcional) & igual \\
+\bottomrule
+\end{tabular}
+\caption{Interfaz de línea de comandos de los ocho binarios.}
+\end{table}
+
 \subsubsection*{Librerías externas}
 \begin{itemize}[nosep]
     \item \textbf{OpenSSL / libcrypto} (\texttt{openssl/des.h}): provee las primitivas de bajo nivel de DES usadas por \texttt{des\_encrypt}/\texttt{des\_decrypt} (arriba).
@@ -889,47 +1108,72 @@ y~\ref{sec:comparativa}).
 \label{sec:anexo2}
 % =======================================================================
 
-El benchmark completo se ejecutó con 4 procesos y un timeout de 180
-segundos por caso, usando el espacio efectivo reducido
-$N_{\text{ef}}=2^{27}$ descrito en la Sección~\ref{sec:secuencial}. La
-ejecución completa (4 casos $\times$ 6 programas = 24 corridas) tomó
-$\approx 150$ segundos de cómputo acumulado en total (suma de las 24
-corridas). Los resultados crudos están
+El benchmark completo se ejecutó con 4 procesos, 2 hilos OpenMP para el
+híbrido y un timeout de 180 segundos por corrida, sobre el espacio
+efectivo reducido $N_{\text{ef}}=2^{27}$ fijo
+(Sección~\ref{sec:secuencial}). La ejecución completa (4 casos
+$\times$ 6 programas = 24 corridas) tomó $\approx 4$ minutos. Los resultados crudos están
 en \texttt{resultados\_benchmark.csv} (repositorio del proyecto) y el
 resumen de speedup/eficiencia en la Tabla~\ref{tab:speedup}.
 
 Las capturas de pantalla de las ejecuciones reales se presentan en las
 Figuras~\ref{fig:b1} y~\ref{fig:b3todos}, y las gráficas de
 speedup/eficiencia generadas por \texttt{scripts/speedup.py} se
-presentan en las Figuras~\ref{fig:speedup-facil}--\ref{fig:eficiencia}
+presentan en las Figuras~\ref{fig:speedup-facil}--\ref{fig:speedup}
 (Sección~\ref{sec:comparativa}).
+
+\subsection*{Variación del tiempo con el número de procesos}
+\label{sec:np}
+
+Caso ``difícil'' (llave $29\,498\,402$ dentro de $[0,2^{27}-1]$,
+secuencial 9.20\,s), tiempo de búsqueda interno (\texttt{MPI\_Wtime}).
+El híbrido usa 2 hilos por proceso, por lo que con $np$ procesos emplea
+$2\,np$ núcleos. Máquina de 20 núcleos lógicos, corridas con
+\texttt{--oversubscribe}. Datos crudos en
+\texttt{resultados\_np\_scaling.csv}; una sola corrida por punto.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Acercamiento} & $np=2$ & $np=4$ & $np=8$ & $np=16$ \\
+\midrule
+Naive & 9.06 & 9.31 & 4.07 & 2.03 \\
+Master-worker & 9.22 & 3.08 & 1.42 & 0.78 \\
+Striding & 4.64 & 2.37 & 1.46 & 0.90 \\
+Shuffled & 8.74 & 8.77 & 4.09 & 1.41 \\
+Híbrido (2 hilos) & 4.69 & 5.88 & 3.65 & 1.96 \\
+\bottomrule
+\end{tabular}
+\caption{Tiempo (s) por acercamiento y número de procesos.}
+\label{tab:np}
+\end{table}
+
+Naive no mejora entre $np=2$ y $np=4$ (la llave sigue en el bloque del
+proceso~0) y baja a saltos al achicarse los bloques ($np=8,16$). Striding
+escala casi linealmente (speedups 1.98, 3.89, 6.31, 10.3; eficiencia 0.64 en
+$np=16$, no se investigó la causa). Master-worker rinde $\approx np-1$ (con
+$np=2$ hay un solo trabajador). Shuffled sigue el patrón por bloques de
+naive con esta llave. El híbrido usa $2\,np$ hilos y, como sus bloques son
+contiguos, para $np\le4$ la llave sigue en el bloque del proceso~0.
 
 Pasos para reproducir las pruebas:
 
 \begin{lstlisting}[language=bash]
-export PATH="/usr/lib64/openmpi/bin:$PATH"   # si mpirun no está en PATH
+export PATH="/usr/lib64/openmpi/bin:$PATH"   # si mpirun no esta en PATH
 make
 chmod +x scripts/benchmark.sh
-./scripts/benchmark.sh 4 180    # np=4, timeout=3 min por caso
+./scripts/benchmark.sh 4 180 2  # np=4, timeout=3 min, 2 hilos OpenMP
 python3 scripts/speedup.py      # genera tabla + graficas en results/
 \end{lstlisting}
 
-\subsection*{Extras (créditos adicionales opcionales)}
+\subsection*{Extras}
 
-\begin{itemize}
-    \item \textbf{Cluster MPI en 2+ máquinas} (hasta 20\% extra).
-    \textbf{No intentado} en esta entrega, por decisión del equipo.
-    \item \textbf{OpenMP + MPI híbrido} (hasta 10\% extra).
-    \textbf{Implementado y verificado} (\texttt{hybrid\_mpi\_omp.c},
-    Sección~\ref{sec:comparativa}). La Tabla~\ref{tab:speedup}
-    muestra speedup consistentemente superior al naive puro, con el
-    mismo \texttt{np}, en los tres casos probados (fácil, media,
-    difícil).
-    \item \textbf{3+ acercamientos adicionales al naive} (hasta 5\%
-    extra). \textbf{Cumplido con holgura:} se implementaron 3
-    acercamientos alternativos (master-worker, striding, shuffled),
-    más la versión híbrida como cuarto acercamiento adicional. Los
-    5 funcionan y están medidos en la Tabla~\ref{tab:comparativa}.
+\begin{itemize}[nosep]
+    \item \textbf{Cluster MPI en 2+ máquinas:} no intentado.
+    \item \textbf{OpenMP + MPI:} \texttt{hybrid\_mpi\_omp.c}. Es $1.5\times$ más rápido que naive con el mismo \texttt{np} en los casos media y difícil, y más lento en el fácil (Tabla~\ref{tab:comparativa}).
+    \item \textbf{3+ acercamientos adicionales:} master-worker, striding, shuffled e híbrido, todos medidos en la Tabla~\ref{tab:comparativa}.
 \end{itemize}
 
 % =======================================================================

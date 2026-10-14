@@ -7,7 +7,7 @@
 # bitácora de pruebas y speedups).
 #
 # Uso:
-#   ./scripts/benchmark.sh [np] [timeout_segundos]
+#   ./scripts/benchmark.sh [np] [timeout_segundos] [hilos_openmp]
 #
 # Ejemplos:
 #   ./scripts/benchmark.sh          # np=4, sin timeout en paralelos
@@ -24,10 +24,11 @@ CIPH="data/texto_cifrado.bin"
 KEYWORD="es una prueba de"
 NP="${1:-4}"
 TIMEOUT_SECS="${2:-0}"   # 0 = sin límite de tiempo
+HILOS="${3:-2}"           # hilos OpenMP por proceso en hybrid_mpi_omp
 OUT_CSV="resultados_benchmark.csv"
 
 echo "=== Benchmark Proyecto 2 — np=$NP $([ "$TIMEOUT_SECS" -gt 0 ] && echo ", timeout=${TIMEOUT_SECS}s" || echo "") ==="
-echo "programa,np,caso,llave,tiempo_segundos" > "$OUT_CSV"
+echo "programa,np,hilos,caso,llave,tiempo_segundos,tiempo_wall_segundos" > "$OUT_CSV"
 
 # Llaves de prueba (Parte B.5), usando un espacio efectivo reducido
 # EFFECTIVE_N en lugar de 2^56 real: a 2^56 ni la versión naive es
@@ -37,7 +38,11 @@ echo "programa,np,caso,llave,tiempo_segundos" > "$OUT_CSV"
 # N/7+N/13) aplicadas sobre EFFECTIVE_N, preservando el fenómeno que se
 # quiere demostrar (posición de la llave dentro del segmento) con
 # tiempos de ejecución razonables. Ver discusión en el informe.
-EFFECTIVE_N=$((2**27))   # ~134M llaves; ajustar si se corre en hardware más lento/rápido
+EFFECTIVE_N=$((2**27))
+# Espacio de búsqueda FIJO [0, EFFECTIVE_N-1] para todos los casos: lo que
+# varía entre casos es sólo la posición de la llave (como en el enunciado,
+# donde las llaves son fracciones de 2^56 dentro de un mismo espacio).
+MAX_KEY=$(( EFFECTIVE_N - 1 ))   # ~134M llaves; ajustar si se corre en hardware más lento/rápido
 
 KEYS_NOMBRES=(baseline_123456 facil media dificil)
 KEYS_VALORES=(
@@ -47,42 +52,46 @@ KEYS_VALORES=(
   $(( EFFECTIVE_N/7 + EFFECTIVE_N/13 + 1 ))
 )
 
-run_seq() {
-  local nombre="$1"
-  local llave="$2"
+# Extrae el tiempo interno (MPI_Wtime / clock) que imprime cada programa en
+# su línea "Tiempo ...: X segundos". Es el tiempo de cómputo de la búsqueda,
+# sin el arranque de mpirun (~1.5 s), que sí está incluido en el tiempo de
+# pared (columna tiempo_wall_segundos).
+extract_internal_time() {
+  grep -i 'Tiempo' | grep -oE '[0-9]+\.[0-9]+ segundos' | head -1 | grep -oE '[0-9]+\.[0-9]+' || true
+}
 
-  echo ">> [secuencial] caso '$nombre' (llave=$llave)"
-  local t0 t1 elapsed
+# CSV: programa,np,hilos,caso,llave,tiempo_segundos,tiempo_wall_segundos
+run_one() {
+  local programa="$1" np="$2" hilos="$3" nombre="$4" llave="$5"
+  shift 5
+  local t0 t1 wall out interno
+  echo ">> [$programa] caso '$nombre' (llave=$llave)"
   t0=$(date +%s.%N)
   if [ "$TIMEOUT_SECS" -gt 0 ]; then
-    timeout "$TIMEOUT_SECS" bin/secuencial "$CIPH" "$KEYWORD" "$llave" || true
+    out=$(timeout "$TIMEOUT_SECS" "$@" 2>&1 || true)
   else
-    bin/secuencial "$CIPH" "$KEYWORD" "$llave" || true
+    out=$("$@" 2>&1 || true)
   fi
   t1=$(date +%s.%N)
-  elapsed=$(echo "$t1 - $t0" | bc)
-  echo "secuencial,1,$nombre,$llave,$elapsed" >> "$OUT_CSV"
+  wall=$(echo "$t1 - $t0" | bc)
+  interno=$(echo "$out" | extract_internal_time)
+  [ -z "$interno" ] && interno="$wall"   # sin salida (timeout): se usa el tiempo de pared
+  echo "$programa,$np,$hilos,$nombre,$llave,$interno,$wall" >> "$OUT_CSV"
+}
+
+run_seq() {
+  run_one secuencial 1 1 "$1" "$2" bin/secuencial "$CIPH" "$KEYWORD" "$MAX_KEY"
 }
 
 run_parallel() {
-  local nombre="$1"
-  local llave="$2"
-  local programa="$3"
-
-  echo ">> [$programa] caso '$nombre' (llave=$llave)"
-  local t0 t1 elapsed
-  t0=$(date +%s.%N)
-  if [ "$TIMEOUT_SECS" -gt 0 ]; then
-    # ADVERTENCIA: el caso 'dificil_no_termina' (2^56/4) puede tardar
-    # muchísimo o no terminar con el acercamiento naive. El parámetro
-    # timeout limita el tiempo máximo de espera.
-    timeout "$TIMEOUT_SECS" mpirun -np "$NP" "bin/$programa" "$CIPH" "$KEYWORD" "$llave" || true
+  local nombre="$1" llave="$2" programa="$3"
+  if [ "$programa" = "hybrid_mpi_omp" ]; then
+    run_one "$programa" "$NP" "$HILOS" "$nombre" "$llave" \
+      mpirun -np "$NP" "bin/$programa" "$CIPH" "$KEYWORD" "$MAX_KEY" "$HILOS"
   else
-    mpirun -np "$NP" "bin/$programa" "$CIPH" "$KEYWORD" "$llave" || true
+    run_one "$programa" "$NP" 1 "$nombre" "$llave" \
+      mpirun -np "$NP" "bin/$programa" "$CIPH" "$KEYWORD" "$MAX_KEY"
   fi
-  t1=$(date +%s.%N)
-  elapsed=$(echo "$t1 - $t0" | bc)
-  echo "$programa,$NP,$nombre,$llave,$elapsed" >> "$OUT_CSV"
 }
 
 for i in "${!KEYS_NOMBRES[@]}"; do
@@ -104,16 +113,11 @@ for i in "${!KEYS_NOMBRES[@]}"; do
 done
 
 # -----------------------------------------------------------------------
-# NOTA sobre Parte B.2 (bordes de segmento, np=4, 2^56/4 y 2^56/4+1):
-# se dejó como análisis teórico en el informe (igual que lo plantea el
-# enunciado, en modo hipotético: "un algoritmo secuencial le hubiera
-# tomado..."). No se automatiza aquí una demo "en vivo" de esos bordes
-# porque, con un texto/keyword tan cortos, decrypts con llaves
-# incorrectas pueden coincidir por azar con la keyword buscada (falso
-# positivo) antes de llegar a la llave real, lo que vuelve el timing
-# de un caso de borde específico no reproducible de forma confiable.
-# Ver discusión de falsos positivos y colisiones de paridad DES en el
-# informe.
+# NOTA sobre Parte B.2 (np=4, llaves 123456, 2^56/4 y 2^56/4+1): no se
+# automatiza aquí. Se corrió a mano con naive_mpi y max_key = 2^56-1
+# (72057594037927935): 123456 y 2^56/4+1 terminan en milisegundos; 2^56/4
+# no termina en tiempo humano (ver informe, sección 3.2). Este script usa el
+# espacio reducido 2^27 para las comparaciones fácil/media/difícil.
 # -----------------------------------------------------------------------
 
 echo ""
