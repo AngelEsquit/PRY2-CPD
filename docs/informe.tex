@@ -224,9 +224,9 @@ todas las versiones paralelas.
 \textbf{max\_key} & \textbf{Tiempo (s)} & \textbf{Observaciones} \\
 \midrule
 123{,}456 & 0.047 & Caso base (Parte B.2) \\
-67{,}108{,}865 ($N/2+1$, $N=2^{27}$) & 20.897 & Caso ``fácil'' (Parte B.5) \\
-83{,}886{,}080 ($N/2+N/8$) & 26.143 & Caso ``media'' (Parte B.5) \\
-29{,}498{,}402 ($N/7+N/13+1$) & 9.209 & Caso ``difícil'' (Parte B.5) \\
+67{,}108{,}865 ($N/2+1$, $N=2^{27}$) & 20.915 & Caso ``fácil'' (Parte B.5) \\
+83{,}886{,}080 ($N/2+N/8$) & 26.134 & Caso ``media'' (Parte B.5) \\
+29{,}498{,}402 ($N/7+N/13+1$) & 9.211 & Caso ``difícil'' (Parte B.5) \\
 \bottomrule
 \end{tabular}
 \caption{Tiempos de la versión secuencial, medidos con
@@ -628,9 +628,9 @@ Anexo~\ref{sec:anexo2} y en \texttt{resultados\_benchmark.csv}.
 \toprule
 \textbf{Caso} & \textbf{Secuencial} & \textbf{Naive} & \textbf{Master-W.} & \textbf{Striding} & \textbf{Shuffled} & \textbf{Híbrido} \\
 \midrule
-Fácil   & 20.897 & 6.733 & 8.458 & 6.789 & 6.234 & 4.866 \\
-Media   & 26.143 & 8.017 & 10.258 & 8.086 & 2.642 & 5.728 \\
-Difícil & 9.209  & 3.816 & 4.595 & 3.839 & 2.494 & 3.000 \\
+Fácil   & 20.915 & 6.718 & 8.496 & 6.754 & 6.280 & 4.872 \\
+Media   & 26.134 & 8.015 & 10.221 & 8.087 & 2.647 & 5.783 \\
+Difícil & 9.211  & 3.793 & 4.579 & 3.794 & 2.464 & 2.987 \\
 \bottomrule
 \end{tabular}
 \caption{Tiempos de ejecución (s) por caso y acercamiento, $np=4$
@@ -646,11 +646,11 @@ proceso). Fuente: \texttt{resultados\_benchmark.csv}.}
 \toprule
 \textbf{Acercamiento} & \textbf{Speedup (fácil/media/difícil)} & \textbf{Eficiencia} & \textbf{Observación} \\
 \midrule
-Naive           & 3.10 / 3.26 / 2.41  & 0.78 / 0.82 / 0.60 & Razonablemente estable en este muestreo \\
-Master-worker   & 2.47 / 2.55 / 2.00  & 0.62 / 0.64 / 0.50 & El más lento de los 5 en todos los casos \\
-Striding        & 3.08 / 3.23 / 2.40  & 0.77 / 0.81 / 0.60 & Muy similar a naive en este muestreo \\
-Shuffled        & 3.35 / 9.90 / 3.69  & 0.84 / 2.47 / 0.92 & Mejor tiempo absoluto en los 3 casos \\
-Híbrido (2 hilos) & 4.29 / 4.56 / 3.07 & 1.07 / 1.14 / 0.77 & Supera a naive puro con el mismo \texttt{np} en los 3 casos \\
+Naive           & 3.11 / 3.26 / 2.43  & 0.78 / 0.82 / 0.61 & Razonablemente estable en este muestreo \\
+Master-worker   & 2.46 / 2.56 / 2.01  & 0.62 / 0.64 / 0.50 & El más lento de los 5 en todos los casos \\
+Striding        & 3.10 / 3.23 / 2.43  & 0.77 / 0.81 / 0.61 & Muy similar a naive en este muestreo \\
+Shuffled        & 3.33 / 9.87 / 3.74  & 0.83 / 2.47 / 0.94 & Mejor tiempo absoluto en los 3 casos \\
+Híbrido (2 hilos) & 4.29 / 4.52 / 3.08 & 1.07 / 1.13 / 0.77 & Supera a naive puro con el mismo \texttt{np} en los 3 casos \\
 \bottomrule
 \end{tabular}
 \caption{Speedup y eficiencia respecto a la versión secuencial, por
@@ -677,7 +677,7 @@ variando sólo la posición de la llave dentro de ese rango fijo.
 
 Segundo, se observan eficiencias por encima de 1.0 (speedup
 superlineal) en shuffled en el caso media (2.47) y en híbrido en los
-casos fácil y media (1.07 y 1.14). Esto es consistente con el overhead
+casos fácil y media (1.07 y 1.13). Esto es consistente con el overhead
 fijo de arranque de MPI (\texttt{MPI\_Init}, carga del ejecutable en 4
 procesos), que a esta escala reducida es comparable al tiempo total de
 búsqueda. No representa una ganancia real de eficiencia, sino un
@@ -776,7 +776,7 @@ verificando un segundo criterio de coincidencia.
     media) del tiempo paralelo de cada acercamiento sobre los 3 casos
     empíricos de la Tabla~\ref{tab:comparativa}, los números cuentan
     una historia más matizada. Naive y striding obtienen exactamente
-    el mismo CV (0.35), y shuffled obtiene un CV mayor (0.56) que el
+    el mismo CV (0.35), y shuffled obtiene un CV mayor (0.57) que el
     propio naive, a pesar de ser el más rápido en tiempo absoluto.
     \textbf{En esta muestra de 3 casos, striding no demuestra
     empíricamente menor variabilidad que naive.} El efecto de
@@ -799,8 +799,8 @@ verificando un segundo criterio de coincidencia.
     overhead de inicialización de MPI por proceso. En las pruebas de
     la Tabla~\ref{tab:speedup}, el híbrido con 2 hilos por proceso
     obtuvo mayor speedup que la versión naive pura con el mismo
-    \texttt{np} en los tres casos: 4.29 vs. 3.10 en fácil, 4.56 vs.
-    3.26 en media, 3.07 vs. 2.41 en difícil. Es consistente en los
+    \texttt{np} en los tres casos: 4.29 vs. 3.11 en fácil, 4.52 vs.
+    3.26 en media, 3.08 vs. 2.43 en difícil. Es consistente en los
     tres, lo que satisface el criterio de ``speedup consistente''
     pedido para el extra de OpenMP. El acercamiento shuffled resultó,
     sin embargo, el más rápido en términos absolutos de los 5 en los
