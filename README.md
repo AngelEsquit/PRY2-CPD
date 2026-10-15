@@ -124,6 +124,35 @@ mpirun --bind-to none -np 4 bin/hybrid_mpi_omp data/texto_cifrado.bin "es una pr
 > y los hilos de OpenMP terminan compartiéndolo (speedup de sólo ~1.55x sin importar cuántos
 > hilos). Hay que lanzar con `--bind-to none` (o `--map-by slot:PE=<hilos>`).
 
+### Llaves de ejemplo (espacio `[0, 2^24-1]`, `np = 4`)
+
+Cada programa corre solo; basta cifrar con la llave y lanzar el que se quiera
+(`export PATH=/usr/lib64/openmpi/bin:$PATH` en Fedora). Ejemplo con la llave "suerte" del shuffle:
+
+```bash
+bin/cifrar data/texto.txt data/c.bin 7064183
+bin/secuencial data/c.bin "es una prueba de" 16777215
+mpirun -np 4 bin/shuffled_mpi data/c.bin "es una prueba de" 16777215   # ~0.06 s
+```
+
+O con la demo: `./scripts/demo.sh suerte-shuffled` (también acepta una llave numérica).
+`python3 scripts/lucky_keys.py` imprime cuántas llaves prueba el proceso más lento de cada
+acercamiento (verificado contra corridas reales).
+
+| Preset / llave | naive | striding | master-worker | shuffled | Qué muestra |
+|---|---|---|---|---|---|
+| `suerte-shuffled` 7064183 | 0.98 s | 0.60 s | 0.75 s | **0.06 s** | el shuffle cae justo al inicio de un bloque |
+| `suerte-naive` 8388608 (= 2·N/4) | **0.09 s** | 0.75 s | 0.87 s | 0.66 s | naive instantáneo, inicio del bloque 2 |
+| `mala-naive` 16777215 (= N-1) | 1.31 s | 1.32 s | 1.75 s | 0.41 s | final del último bloque: naive y striding hacen todo el trabajo |
+| `mala-shuffled` 3428550 | 1.12 s | **0.32 s** | **0.36 s** | 1.34 s | peor caso del shuffle; striding y master-worker no lo notan |
+| `chica` 42 | ~0 | ~0 | ~0 | ~1 s | llave pequeña: gana todo lo que recorre en orden, shuffled no |
+| 12000000 (demo) | 1.16 s | 1.01 s | 1.26 s | 0.06 s | secuencial 3.78 s |
+
+El tiempo de un acercamiento depende de *dónde* cae la llave en su orden de recorrido, no
+solo de `np`. Striding (~`llave/np`) y master-worker (~`llave/(np-1)`) son predecibles;
+naive y shuffled dependen de la posición dentro del bloque. Los casos "suerte" tienen un
+piso de ~0.06-0.09 s por el arranque de MPI.
+
 ### 5. Reproducir las pruebas del informe
 
 ```bash

@@ -3,9 +3,16 @@
 # demo.sh -- demo corta (~1 min) para la presentación.
 # 1) cifrar/descifrar con llave 42   2) naive con 2^56/4+1 (instantáneo)
 # 3) los 6 programas buscando la misma llave en [0, 2^24-1], np=4
-# Uso: ./scripts/demo.sh [llave=12000000]
+# Uso: ./scripts/demo.sh [llave|preset]   (default 12000000)
+#   presets (N=2^24, np=4; ver scripts/lucky_keys.py): suerte-shuffled, suerte-naive,
+#   mala-naive, mala-shuffled, chica
 # ---------------------------------------------------------------------
 set -euo pipefail
+case "${1:-}" in
+  suerte-shuffled) set -- 7064183;;  suerte-naive) set -- 8388608;;
+  mala-naive) set -- 16777215;;     mala-shuffled) set -- 3428550;;
+  chica) set -- 42;;
+esac
 KEY="${1:-12000000}"; KW="es una prueba de"; C=data/texto_cifrado_demo.bin
 N=$((2**24)); M=$((N-1)); BIG=72057594037927935
 [ -x bin/naive_mpi ] || make > /dev/null

@@ -288,7 +288,7 @@ El espacio de llaves real de DES, $N = 2^{56}$, es intratable en la
 práctica para esta comparación. A la tasa de verificación medida en
 esta máquina ($\approx 3.2 \times 10^{6}$ llaves/segundo por núcleo),
 recorrer $2^{56}$ llaves secuencialmente tomaría aproximadamente
-$2.25 \times 10^{9}$ segundos, unos 71 años. Por eso se sustituyó
+$2.25 \times 10^{10}$ segundos, unos 710 años. Por eso se sustituyó
 $N=2^{56}$ por un espacio efectivo reducido
 $N_{\text{ef}} = 2^{27} \approx 1.34 \times 10^{8}$ para los casos
 fácil/media/difícil de la Parte B.5, siguiendo la misma lógica de
@@ -1057,7 +1057,7 @@ verificando un segundo criterio de coincidencia.
     analítico de la Sección~\ref{sec:b2} lo muestra en el extremo. Con
     $np=4$ y $2^{56}$ llaves, la misma \texttt{max\_key} da un speedup de
     $\approx1$ si la llave está al final del bloque del proceso~0 y de
-    $\approx4.5\times10^{15}$ si está al inicio del bloque del
+    $\approx1.8\times10^{16}$ si está al inicio del bloque del
     proceso~1. Los casos medidos a escala $2^{27}$ lo confirman, ya que naive
     va de 222.9 a 0.99 (coeficiente de variación del speedup entre los
     tres casos, 1.36). Striding, en cambio, da 3.96, 3.96 y 3.89
