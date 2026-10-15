@@ -13,7 +13,8 @@ pseudo-aleatorio e híbrido MPI+OpenMP). El informe está en `docs/informe.pdf`.
 
 ```bash
 make                    # compila todo en bin/
-./scripts/demo.sh       # cifra/descifra con llave 42, naive con 2^56/4+1 y los 6 programas
+./scripts/demo.sh       # (opcional: ./scripts/demo.sh suerte-shuffled | suerte-naive | mala-naive | mala-shuffled | chica | <llave>)
+                        # cifra/descifra con llave 42, naive con 2^56/4+1 y los 6 programas
                         # buscando la misma llave en [0, 2^24-1] con np = 4
 ```
 
@@ -43,7 +44,8 @@ cómo reparten el espacio. Para mostrar la variabilidad por posición de la llav
 │   ├── hybrid_threads.sh        # escalado del híbrido con los hilos -> resultados_hybrid_threads.csv
 │   ├── hybrid_grid.sh           # 8x1, 4x2, 2x4, 1x8 procesos x hilos -> resultados_hybrid_grid.csv
 │   ├── extra_plots.py           # gráficas de np, hilos del híbrido y reparto procesos x hilos
-│   └── demo.sh                  # demo corta para la presentación
+│   ├── lucky_keys.py            # llaves de ejemplo y costo predicho por acercamiento
+│   └── demo.sh                  # demo corta para la presentación (acepta llave o preset)
 ├── results/                     # gráficas generadas
 └── src/
     ├── common/                  # common.c/h (archivos, padding, errores), des.c/h (DES con OpenSSL)
@@ -136,8 +138,24 @@ mpirun -np 4 bin/shuffled_mpi data/c.bin "es una prueba de" 16777215   # ~0.06 s
 ```
 
 O con la demo: `./scripts/demo.sh suerte-shuffled` (también acepta una llave numérica).
-`python3 scripts/lucky_keys.py` imprime cuántas llaves prueba el proceso más lento de cada
-acercamiento (verificado contra corridas reales).
+`scripts/lucky_keys.py` es sólo una calculadora (no ejecuta ni necesita MPI): dada una llave,
+usa el modelo del informe para predecir cuántas llaves debe probar cada acercamiento antes de
+encontrarla, y así se eligieron las llaves de abajo. Uso: `python3 scripts/lucky_keys.py [N] [np]`
+(por defecto `N = 2^24`, `np = 4`). Verificado contra corridas reales.
+
+Llaves probadas por el proceso que encuentra la llave (predicción del modelo; tiempo ≈ llaves / 3.2M por s):
+
+| Preset | Llave | naive | striding | master-worker | shuffled |
+|---|---|---|---|---|---|
+| `suerte-shuffled` | 7064183 | 2 869 879 | 1 766 045 | 2 354 727 | **0** |
+| `suerte-naive` | 8388608 | **0** | 2 097 152 | 2 796 202 | 1 840 985 |
+| `chica` | 42 | 42 | 10 | 14 | 3 267 235 |
+| `mala-naive` | 16777215 | 4 194 303 | 4 194 303 | 5 592 405 | 1 107 976 |
+| (fin del bloque 0) | 4194303 | 4 194 303 | 1 048 575 | 1 398 101 | 1 107 976 |
+| `mala-shuffled` | 3428550 | 3 428 550 | 857 137 | 1 142 850 | 4 194 303 |
+| demo por defecto | 12000000 | 3 611 392 | 3 000 000 | 4 000 000 | 41 561 |
+
+Tiempos medidos con esas llaves:
 
 | Preset / llave | naive | striding | master-worker | shuffled | Qué muestra |
 |---|---|---|---|---|---|
